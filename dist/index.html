@@ -40,7 +40,7 @@
             assistiveMml: true,
           },
         },
-        // convert functions (tex2mmlPromise, mathml2chtmlPromise, etc.) use renderActions
+        // typesetPromise and convert functions use renderActions
         renderActions: {
           enrich: [],
           attachSpeech: [],
@@ -61,32 +61,7 @@
       }
     };
 
-    // mathml2chtmlPromise bypasses renderActions, so embed assistive MathML manually
-    function stripIdsFromTree(node) {
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        node.removeAttribute('id');
-        for (const child of node.children) {
-          stripIdsFromTree(child);
-        }
-      }
-    }
-
-    function addAssistiveMml(container, mathml) {
-      const assistive = document.createElement('mjx-assistive-mml');
-      assistive.setAttribute('unselectable', 'on');
-      const doc = new DOMParser().parseFromString(mathml, 'application/xml');
-      const error = doc.querySelector('parsererror');
-      if (error) {
-        console.error('Invalid MathML for assistive-mml:', error.textContent);
-        return container;
-      }
-      const mathNode = document.importNode(doc.documentElement, true);
-      // ids are for CHTML sync highlighting; duplicate ids break getElementById
-      stripIdsFromTree(mathNode);
-      assistive.appendChild(mathNode);
-      container.insertBefore(assistive, container.firstChild);
-      return container;
-    }
+    const MATH_DISPLAY_ID = 'math-display';
 
     function findNavigationElement(id) {
       const output = document.getElementById('mathml-output');
@@ -122,23 +97,26 @@
       return mathml;
     }
 
-    // Get the MathJax version of the MathML
-    async function ConvertToCHTML(mathml) {
+    // Insert canonical MathML and run MathJax's regular typeset pipeline
+    async function TypesetMathML(mathml) {
       await MathJax.startup.promise;
-      let node = await MathJax.mathml2chtmlPromise(mathml);
-      if (MathJax.config.options.enableAssistiveMml) {
-        if (node.tagName.toLowerCase() !== 'mjx-container') {
-          const container = document.createElement('mjx-container');
-          container.className = 'MathJax CHTML';
-          container.setAttribute('jax', 'CHTML');
-          container.appendChild(node);
-          node = container;
-        }
-        addAssistiveMml(node, mathml);
+      const container = document.getElementById(MATH_DISPLAY_ID);
+      if (!container) {
+        throw new Error('math-display container not found');
       }
-      MathJax.startup.document.reset();
-      MathJax.startup.document.updateDocument();
-      return node;
+      MathJax.typesetClear([container]);
+      container.innerHTML = mathml;
+      await MathJax.typesetPromise([container]);
+    }
+
+    async function ShowMathError(message) {
+      await MathJax.startup.promise;
+      const container = document.getElementById(MATH_DISPLAY_ID);
+      if (!container) {
+        return;
+      }
+      MathJax.typesetClear([container]);
+      container.textContent = message;
     }
 
     // helper function because Rust-side wasn't working per docs
@@ -171,9 +149,11 @@
     function SetCookie(cookie_value) {
       let answer = document.cookie;
       if (cookie_value) {
-        let cookieArray = cookie_value.split(";");
-        for(let i=0; i<cookieArray.length; i++){
-          document.cookie=cookieArray[i] + "; max-age=31536000; SameSite=Lax";
+        for (const entry of cookie_value.split(";")) {
+          const trimmed = entry.trim();
+          if (trimmed) {
+            document.cookie = trimmed + "; max-age=31536000; SameSite=Lax";
+          }
         }
       }
       return answer;
@@ -397,8 +377,8 @@
     <!-- for debugging -->
     
 <script type="module">
-import init, * as bindings from '/MathCATDemo/math_cat_demo-4ba0cde89405ba3e.js';
-const wasm = await init({ module_or_path: '/MathCATDemo/math_cat_demo-4ba0cde89405ba3e_bg.wasm' });
+import init, * as bindings from '/MathCATDemo/math_cat_demo-4881d6f898f6f1c6.js';
+const wasm = await init({ module_or_path: '/MathCATDemo/math_cat_demo-4881d6f898f6f1c6_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -407,5 +387,5 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>  
-<link rel="modulepreload" href="/MathCATDemo/math_cat_demo-4ba0cde89405ba3e.js" crossorigin="anonymous" integrity="sha384-/f8s0phMVa/m4ZFotRInuvwmbSFv23jLtnBx9C08acWDEP3+7eljSvSgAqIhSH1y"><link rel="preload" href="/MathCATDemo/math_cat_demo-4ba0cde89405ba3e_bg.wasm" crossorigin="anonymous" integrity="sha384-E95MuhqpEkoSjCGhhLddTsaCVMHymc424VKGkiabHPMWcTFXpJCk2xqkmpCcCjse" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/MathCATDemo/math_cat_demo-4881d6f898f6f1c6.js" crossorigin="anonymous" integrity="sha384-GQN/gakKTgZjF7VCeDjQ44nrzRVazLWgAuqKQmnA/s7EhGJZuxXW7R5yEgHg3/mQ"><link rel="preload" href="/MathCATDemo/math_cat_demo-4881d6f898f6f1c6_bg.wasm" crossorigin="anonymous" integrity="sha384-42BRSvj23LlVsXAt+eoRhtRBZNOZIaaMop/Qr9f0HjWxkDaqIWaWTbS6LO/oxTT2" as="fetch" type="application/wasm"></head>
 </html>

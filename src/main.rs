@@ -8,7 +8,6 @@ use regex::Regex;
 extern crate lazy_static;
 
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::{spawn_local, JsFuture};
 use cfg_if::cfg_if;
 use libmathcat::*;
@@ -34,7 +33,6 @@ enum Msg {
     NewMathML,
     MathReady {
         math_string: String,
-        chtml: Element,
     },
     NavMode(&'static str),
     NavVerbosity(&'static str),
@@ -89,6 +87,16 @@ impl Model {
         cookie += &format!("braille_display_as={};", self.braille_display_as);
         cookie += &format!("braille_dots78={};", self.braille_dots78);
         cookie += &format!("tts={};", self.tts);
+        set_cookie(&cookie);
+    }
+
+    fn apply_loaded_preferences(&self) {
+        if let Err(e) = set_preference("NavMode".to_string(), self.nav_mode.clone()) {
+            error!("Failed to set NavMode from cookies: {}", e);
+        }
+        if let Err(e) = set_preference("NavVerbosity".to_string(), self.nav_verbosity.clone()) {
+            error!("Failed to set NavVerbosity from cookies: {}", e);
+        }
     }
 
     fn init_state_from_cookies(&mut self) {
@@ -130,13 +138,9 @@ enum PendingMath {
     AlreadyMathML(String),
 }
 
-fn unrecognized_math_element() -> Element {
-    let span = yew::utils::document().create_element("span").unwrap();
-    span.set_text_content(Some("Unrecognized Math -- use $...$ for TeX, `...` for ASCIIMath, or enter MathML"));
-    span
-}
+static MATH_ERROR: &str = "Unrecognized Math -- use $...$ for TeX, `...` for ASCIIMath, or enter MathML";
 
-async fn convert_and_render_math(pending: PendingMath) -> (String, Element) {
+async fn convert_and_render_math(pending: PendingMath) -> String {
     let mut mathml = match pending {
         PendingMath::Convert { content, format } => {
             JsFuture::from(string_to_mathml(&content, format))
@@ -157,16 +161,17 @@ async fn convert_and_render_math(pending: PendingMath) -> (String, Element) {
         Ok(m) => {
             let math = m.trim_end().to_string();
             debug!("MathML with ids: \n{}", &math);
-            let chtml = JsFuture::from(mathml_to_chtml(math.clone()))
+            JsFuture::from(typeset_mathml(&math))
                 .await
-                .unwrap()
-                .dyn_into::<Element>()
                 .unwrap();
-            (math, chtml)
+            math
         }
         Err(e) => {
             error!("{}", e);
-            (String::new(), unrecognized_math_element())
+            JsFuture::from(show_math_error(MATH_ERROR))
+                .await
+                .unwrap();
+            String::new()
         }
     }
 }
@@ -240,12 +245,14 @@ impl Component for Model {
     type Properties = ();
 
     fn create(_props: Self::Properties, link: ComponentLink<Self>) -> Self {
+        let display_node = yew::utils::document().create_element("div").unwrap();
+        display_node.set_id("math-display");
         let mut initial_state = Self {
             link,
             math_string: String::default(),
             nav_mode: "Enhanced".to_string(),
             nav_verbosity: "Verbose".to_string(),
-            display: Html::VRef(yew::utils::document().create_element("div").unwrap().into()),
+            display: Html::VRef(display_node.into()),
             language: "en".to_string(),
             speech_style: "ClearSpeak".to_string(),
             speak: true,
@@ -270,6 +277,7 @@ impl Component for Model {
             error!("Didn't find rules dir: {}", e.to_string());
         };
         set_preference("CheckRuleFiles".to_string(), "None".to_string()).unwrap();
+        initial_state.apply_loaded_preferences();
 
         return initial_state;
     }
@@ -312,25 +320,18 @@ impl Component for Model {
 
                     let link = self.link.clone();
                     spawn_local(async move {
-                        let (math_string, chtml) = convert_and_render_math(pending).await;
-                        link.send_message(Msg::MathReady { math_string, chtml });
+                        let math_string = convert_and_render_math(pending).await;
+                        link.send_message(Msg::MathReady { math_string });
                     });
                 };
                 return false;
             },
-            Msg::MathReady { math_string, chtml } => {
-                if let Html::VRef(node) = &self.display {
-                    node.set_text_content(Some(""));
-                    let result = node.append_child(&chtml);
-                    if let Err(e) = result {
-                        panic!("append_child returned error '{:?}'", e);
-                    };
-                    self.math_string = math_string;
-                    self.nav_id = "".to_string();
-                    self.nav_offset = 0;
-                    self.update_braille = true;
-                    self.update_speech = true;
-                };
+            Msg::MathReady { math_string } => {
+                self.math_string = math_string;
+                self.nav_id = "".to_string();
+                self.nav_offset = 0;
+                self.update_braille = true;
+                self.update_speech = true;
             },
             Msg::NavMode(text) => {
                 self.nav_mode = text.to_string();
@@ -484,15 +485,27 @@ impl Component for Model {
                     <tr>     // 1x2 outside table
                         <td><h2 id="speech-heading">{"Speech"}</h2></td>
                         <td colspan="3"><label for="Language">{"Language: "}</label>
-                            <span class="select"><select name="language" id="language">
+                            <span class="select"><select name="language" id="language"
+                                onchange=self.link.callback(|e: ChangeData| match e {
+                                    ChangeData::Select(select) => match select.value().as_str() {
+                                        "es" => Msg::Language("es"),
+                                        "fi" => Msg::Language("fi"),
+                                        "sv" => Msg::Language("sv"),
+                                        "id" => Msg::Language("id"),
+                                        "vi" => Msg::Language("vi"),
+                                        "zh-tw" => Msg::Language("zh-tw"),
+                                        _ => Msg::Language("en"),
+                                    },
+                                    _ => Msg::Language("en"),
+                                })>
                             // FIX: this should search available languages
-                                <option value="en" onclick=self.link.callback(|_| Msg::Language("en"))>{"English"}</option>
-                                <option value="es" onclick=self.link.callback(|_| Msg::Language("es"))>{"Spanish"}</option>
-                                <option value="fi" onclick=self.link.callback(|_| Msg::Language("fi"))>{"Finnish"}</option>
-                                <option value="sv" onclick=self.link.callback(|_| Msg::Language("sv"))>{"Swedish"}</option>
-                                <option value="id" onclick=self.link.callback(|_| Msg::Language("id"))>{"Indonesian"}</option>
-                                <option value="vi" onclick=self.link.callback(|_| Msg::Language("vi"))>{"Vietnamese"}</option>
-                                <option value="zh-tw" onclick=self.link.callback(|_| Msg::Language("zh-tw"))>{"Chinese (TW)"}</option>
+                                <option value="en" selected={self.language == "en"}>{"English"}</option>
+                                <option value="es" selected={self.language == "es"}>{"Spanish"}</option>
+                                <option value="fi" selected={self.language == "fi"}>{"Finnish"}</option>
+                                <option value="sv" selected={self.language == "sv"}>{"Swedish"}</option>
+                                <option value="id" selected={self.language == "id"}>{"Indonesian"}</option>
+                                <option value="vi" selected={self.language == "vi"}>{"Vietnamese"}</option>
+                                <option value="zh-tw" selected={self.language == "zh-tw"}>{"Chinese (TW)"}</option>
                             </select></span>
                         </td>
                     </tr><tr>
@@ -614,8 +627,11 @@ extern "C" {
     #[wasm_bindgen(js_name = "ConvertToMathML")]
     pub fn string_to_mathml(mathml: &str, math_format: &str) -> js_sys::Promise;
 
-    #[wasm_bindgen(js_name = "ConvertToCHTML")]
-    pub fn mathml_to_chtml(mathml: String) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = "TypesetMathML")]
+    pub fn typeset_mathml(mathml: &str) -> js_sys::Promise;
+
+    #[wasm_bindgen(js_name = "ShowMathError")]
+    pub fn show_math_error(message: &str) -> js_sys::Promise;
 
     #[wasm_bindgen(js_name = "GetTextOfElement")]
     pub fn get_text_of_element(id: &str) -> String;
