@@ -7,28 +7,112 @@
     <!-- MathJax-related stuff -->
     <script>
     MathJax = {
-      loader: {load: ['input/tex', '[tex]/mhchem', 'input/asciimath', '[mml]/mml3']},
+      loader: {load: ['input/tex', '[tex]/mhchem', 'input/asciimath', '[mml]/mml3', 'a11y/assistive-mml']},
       tex: {packages: {'[+]': ['mhchem']}},
+      mml: {parseAs: 'xml'},
+      startup: {
+        typeset: false, // demo converts math manually, not via page typeset
+        ready() {
+          MathJax.startup.defaultReady();
+          // combined component loads a11y extensions after config; disable their pipeline
+          const disabled = ['enrich', 'attachSpeech', 'complexity', 'explorable', 'addMenu', 'getMenu', 'checkLoading'];
+          for (const id of disabled) {
+            MathJax.startup.document.renderActions[id] = [];
+          }
+        },
+      },
       options: {
         enableMenu: false, // interferes with navigation
-        // enableAssistiveMml: true,
-        enableEnrichment: false,
-        enableExplorer: false,
+        enableAssistiveMml: true, // hidden MathML for MathCAT/screen readers
+        enableEnrichment: false,   // disable SRE semantic enrichment
+        enableSpeech: false,       // disable SRE speech strings
+        enableBraille: false,      // disable SRE Braille labels
+        enableExplorer: false,     // disable MathJax expression explorer
+        enableComplexity: false,
+        // menuOptions.settings control a11y when the combined component loads ui/menu
+        menuOptions: {
+          settings: {
+            showSRE: false,       // omit data-semantic-* attributes from output
+            enrich: false,
+            speech: false,
+            braille: false,
+            collapsible: false,
+            assistiveMml: true,
+          },
+        },
+        // convert functions (tex2mmlPromise, mathml2chtmlPromise, etc.) use renderActions
+        renderActions: {
+          enrich: [],
+          attachSpeech: [],
+          complexity: [],
+          explorable: [],
+          addMenu: [],
+          getMenu: [],
+          checkLoading: [],
+        },
+        a11y: {
+          speech: false,
+          braille: false,
+          voicing: false,
+          subtitles: false,
+          viewBraille: false,
+          help: false,
+        },
       }
     };
 
+    // mathml2chtmlPromise bypasses renderActions, so embed assistive MathML manually
+    function stripIdsFromTree(node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        node.removeAttribute('id');
+        for (const child of node.children) {
+          stripIdsFromTree(child);
+        }
+      }
+    }
+
+    function addAssistiveMml(container, mathml) {
+      const assistive = document.createElement('mjx-assistive-mml');
+      assistive.setAttribute('unselectable', 'on');
+      const doc = new DOMParser().parseFromString(mathml, 'application/xml');
+      const error = doc.querySelector('parsererror');
+      if (error) {
+        console.error('Invalid MathML for assistive-mml:', error.textContent);
+        return container;
+      }
+      const mathNode = document.importNode(doc.documentElement, true);
+      // ids are for CHTML sync highlighting; duplicate ids break getElementById
+      stripIdsFromTree(mathNode);
+      assistive.appendChild(mathNode);
+      container.insertBefore(assistive, container.firstChild);
+      return container;
+    }
+
+    function findNavigationElement(id) {
+      const output = document.getElementById('mathml-output');
+      if (!output || !id) {
+        return null;
+      }
+      for (const element of output.querySelectorAll('[id]')) {
+        if (element.id === id && !element.closest('mjx-assistive-mml')) {
+          return element;
+        }
+      }
+      return null;
+    }
+
     // Convert MathML, TeX (properly delimitated), and ASCIIMath (properly delimitated)
-    function ConvertToMathML(math_str, math_format) {
-      MathJax.startup.defaultReady();
+    async function ConvertToMathML(math_str, math_format) {
+      await MathJax.startup.promise;
       let options = {display: true};
       let mathml;
       try {
         if (math_format == 'ASCIIMath') {
-          mathml = MathJax.asciimath2mml(math_str, options);
+          mathml = await MathJax.asciimath2mmlPromise(math_str, options);
         } else if (math_format == 'TeX') {
-          mathml = MathJax.tex2mml(math_str, options);
+          mathml = await MathJax.tex2mmlPromise(math_str, options);
         } else {  // should be "MathML"
-          mathml = MathJax.mathml2mml(math_str, options);
+          mathml = await MathJax.mathml2mmlPromise(math_str, options);
         };
       } catch (e) {
         console.error("MathJax conversion error: ", e);
@@ -39,9 +123,22 @@
     }
 
     // Get the MathJax version of the MathML
-    function ConvertToCHTML(mathml) {
-      MathJax.startup.defaultReady();
-      return MathJax.mathml2chtml(mathml);
+    async function ConvertToCHTML(mathml) {
+      await MathJax.startup.promise;
+      let node = await MathJax.mathml2chtmlPromise(mathml);
+      if (MathJax.config.options.enableAssistiveMml) {
+        if (node.tagName.toLowerCase() !== 'mjx-container') {
+          const container = document.createElement('mjx-container');
+          container.className = 'MathJax CHTML';
+          container.setAttribute('jax', 'CHTML');
+          container.appendChild(node);
+          node = container;
+        }
+        addAssistiveMml(node, mathml);
+      }
+      MathJax.startup.document.reset();
+      MathJax.startup.document.updateDocument();
+      return node;
     }
 
     // helper function because Rust-side wasn't working per docs
@@ -55,12 +152,16 @@
     }
 
     function HighlightNavigationElement(id, offset) {
-      if (window['MathCAT'].navMark) {
-        removeHighlight(window['MathCAT'].navMark, window['MathCAT'].navMarkOffset, 'nav-highlight');
+      const apply = () => {
+        if (window['MathCAT'].navMark) {
+          removeHighlight(window['MathCAT'].navMark, window['MathCAT'].navMarkOffset, 'nav-highlight');
+        }
+        window['MathCAT'].navMark = id;
+        window['MathCAT'].navMarkOffset = offset;
+        highlightID(id, offset, 'nav-highlight');
       };
-      window['MathCAT'].navMark = id
-      window['MathCAT'].navMarkOffset = offset
-      highlightID(id, offset, 'nav-highlight');
+      // defer until after Yew re-render from navigation updates the speech pane
+      requestAnimationFrame(apply);
     }
 
     function RemoveFocus(id) {
@@ -99,7 +200,7 @@
       input.click();  // triggers 'onchange'
     }
     </script>
-    <script id="MathJax-script" async="" src="https://cdn.jsdelivr.net/npm/mathjax@4.0.0-beta.4/tex-mml-chtml.js"></script>
+    <script id="MathJax-script" async="" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
     <!-- AWS Poly speech/sync highlighting stuff -->
     <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1033.0.min.js"></script>
     <script>
@@ -251,7 +352,7 @@
 
       function removeHighlight(id, offset, className) {
         if (id) {
-          let element = document.getElementById(id);
+          let element = findNavigationElement(id);
           if (element) {
             if (offset > 0 && leafElements.includes(element.tagName.toLowerCase().replace('mjx-', ''))) {
               // for leaf elements, we may have wrapped a span around the content
@@ -267,7 +368,7 @@
       }
 
       function highlightID(id, offset, className) {
-        let element = document.getElementById(id);
+        let element = findNavigationElement(id);
         if (element) {
           if (offset > 0 && leafElements.includes(element.tagName.toLowerCase().replace('mjx-', ''))) {
             // for leaf elements, wrap a span around the content

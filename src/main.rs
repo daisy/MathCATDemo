@@ -8,6 +8,8 @@ use regex::Regex;
 extern crate lazy_static;
 
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::{spawn_local, JsFuture};
 use cfg_if::cfg_if;
 use libmathcat::*;
 
@@ -30,6 +32,10 @@ extern crate log;
 #[derive(Debug)]
 enum Msg {
     NewMathML,
+    MathReady {
+        math_string: String,
+        chtml: Element,
+    },
     NavMode(&'static str),
     NavVerbosity(&'static str),
     Language(&'static str),
@@ -118,6 +124,52 @@ impl Model {
 static INPUT_MESSAGE: &'static str = "Auto-detect format: override using $...$ for TeX, `...` for ASCIIMath, <math>...</math> for MathML\n";
 static START_FORMULA: &'static str = r"$x = {-b \pm \sqrt{b^2-4ac} \over 2a}$";
 // static START_FORMULA: &'static str = r"$x = {t \over 2a}$";
+
+enum PendingMath {
+    Convert { content: String, format: &'static str },
+    AlreadyMathML(String),
+}
+
+fn unrecognized_math_element() -> Element {
+    let span = yew::utils::document().create_element("span").unwrap();
+    span.set_text_content(Some("Unrecognized Math -- use $...$ for TeX, `...` for ASCIIMath, or enter MathML"));
+    span
+}
+
+async fn convert_and_render_math(pending: PendingMath) -> (String, Element) {
+    let mut mathml = match pending {
+        PendingMath::Convert { content, format } => {
+            JsFuture::from(string_to_mathml(&content, format))
+                .await
+                .unwrap()
+                .as_string()
+                .unwrap()
+        }
+        PendingMath::AlreadyMathML(math) => math,
+    };
+
+    if !mathml.contains("display=\"block\"") && !mathml.contains("display='block'") {
+        mathml = mathml.replace("<math ", "<math display='block' ");
+    }
+
+    // MathJax bug https://github.com/mathjax/MathJax/issues/2805: newline at end causes MathJaX to hang(!)
+    match set_mathml(mathml) {
+        Ok(m) => {
+            let math = m.trim_end().to_string();
+            debug!("MathML with ids: \n{}", &math);
+            let chtml = JsFuture::from(mathml_to_chtml(math.clone()))
+                .await
+                .unwrap()
+                .dyn_into::<Element>()
+                .unwrap();
+            (math, chtml)
+        }
+        Err(e) => {
+            error!("{}", e);
+            (String::new(), unrecognized_math_element())
+        }
+    }
+}
 
 /// get text for level 1 header
 fn get_header() -> String {
@@ -234,63 +286,46 @@ impl Component for Model {
         self.update_speech = false;     // turn on when appropriate
         match msg {
             Msg::NewMathML => {
-                // Get the MathML input string, and clear any previous output
-                if let Html::VRef(node) = &self.display {
+                if let Html::VRef(_) = &self.display {
                     let math_str = get_text_of_element("mathml-input");
                     let math_str = math_str.replace(INPUT_MESSAGE, "").replace("\n", " ").trim().to_string();
-                    let mut mathml;
-                    if let Some(caps) = TEX.captures(&math_str) {
+                    let pending = if let Some(caps) = TEX.captures(&math_str) {
                         debug!("TeX: '{}'", &math_str);
-                        mathml = Some(string_to_mathml(&caps["math"], "TeX"));
+                        PendingMath::Convert {
+                            content: caps["math"].to_string(),
+                            format: "TeX",
+                        }
                     } else if let Some(caps) = ASCIIMATH.captures(&math_str) {
-                        mathml = Some(string_to_mathml(&caps["math"], "ASCIIMath"));
+                        PendingMath::Convert {
+                            content: caps["math"].to_string(),
+                            format: "ASCIIMath",
+                        }
                     } else if MATHML.is_match(&math_str) {
-                        // Don't need to convert
-                        mathml = Some( math_str );
+                        PendingMath::AlreadyMathML(math_str)
                     } else {
-                        // auto-detect -- look for {}'s as a sign it is TeX, otherwise ASCIIMath (which accepts a lot of TeX)
-                        mathml = Some(
-                            string_to_mathml(
-                            &math_str,
-                            if math_str.contains("}") {"TeX"} else {"ASCIIMath"}
-                            )
-                        );
+                        let format = if math_str.contains("}") { "TeX" } else { "ASCIIMath" };
+                        PendingMath::Convert {
+                            content: math_str,
+                            format,
+                        }
                     };
-                    // this adds ids and canonicalizes the MathML
-                    if let Some(mut math) = mathml {
-                        if !math.contains("display=\"block\"") && !math.contains("display='block'") {
-                            math = math.replace("<math ", "<math display='block' ");
-                        }
-                        // MathJax bug https://github.com/mathjax/MathJax/issues/2805:  newline at end causes MathJaX to hang(!)
-                        match set_mathml(math) {
-                            Ok(m) => {
-                                let math = m.trim_end().to_string();
-                                debug!("MathML with ids: \n{}", &math);
-                                mathml = Some(math);
-                            },
-                            Err(e) => {
-                                error!("{}", e);
-                                mathml = None;
-                            },
-                        }
-                    }
 
-                    let mathjax_html = match mathml {
-                        Some(math) => {
-                            self.math_string = math.clone();
-                            mathml_to_chtml(math)
-                        },
-                        None => {
-                            let span = yew::utils::document().create_element("span").unwrap();
-                            span.set_text_content(Some("Unrecognized Math -- use $...$ for TeX, `...` for ASCIIMath, or enter MathML"));
-                            span
-                        }
-                    };
+                    let link = self.link.clone();
+                    spawn_local(async move {
+                        let (math_string, chtml) = convert_and_render_math(pending).await;
+                        link.send_message(Msg::MathReady { math_string, chtml });
+                    });
+                };
+                return false;
+            },
+            Msg::MathReady { math_string, chtml } => {
+                if let Html::VRef(node) = &self.display {
                     node.set_text_content(Some(""));
-                    let result = node.append_child(&mathjax_html);
+                    let result = node.append_child(&chtml);
                     if let Err(e) = result {
                         panic!("append_child returned error '{:?}'", e);
                     };
+                    self.math_string = math_string;
                     self.nav_id = "".to_string();
                     self.nav_offset = 0;
                     self.update_braille = true;
@@ -568,16 +603,19 @@ impl Component for Model {
         // this allows for bolding of chars in the braille ASCII display
         let el = self.braille_node_ref.cast::<Element>().unwrap();
         el.set_inner_html(&self.braille);
+        if !self.nav_id.is_empty() {
+            highlight_nav_element(&self.nav_id, self.nav_offset);
+        }
     }
 }
 
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_name = "ConvertToMathML")]
-    pub fn string_to_mathml(mathml: &str, math_format: &str) -> String;
+    pub fn string_to_mathml(mathml: &str, math_format: &str) -> js_sys::Promise;
 
     #[wasm_bindgen(js_name = "ConvertToCHTML")]
-    pub fn mathml_to_chtml(mathml: String) -> Element;
+    pub fn mathml_to_chtml(mathml: String) -> js_sys::Promise;
 
     #[wasm_bindgen(js_name = "GetTextOfElement")]
     pub fn get_text_of_element(id: &str) -> String;
