@@ -1,5 +1,7 @@
-<!DOCTYPE html><html lang="en"><head>
-    <meta charset="utf-8">
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
     <title>MathCAT Demo</title>
 
     <!-- MathJax-related stuff -->
@@ -52,12 +54,13 @@
       }
     }
 
-    function HighlightNavigationElement(id) {
-      if (window['MathCAT'].navigationMark) {
-        removeHighlight(window['MathCAT'].navigationMark, 'nav-highlight');
+    function HighlightNavigationElement(id, offset) {
+      if (window['MathCAT'].navMark) {
+        removeHighlight(window['MathCAT'].navMark, window['MathCAT'].navMarkOffset, 'nav-highlight');
       };
-      window['MathCAT'].navigationMark = id
-      highlightID(id, 'nav-highlight');
+      window['MathCAT'].navMark = id
+      window['MathCAT'].navMarkOffset = offset
+      highlightID(id, offset, 'nav-highlight');
     }
 
     function RemoveFocus(id) {
@@ -103,11 +106,11 @@
       window['MathCAT'] = {};
 
       // Function invoked by button click
-      function SpeakText(text) {
+      function SpeakText(text, lang) {
         if (window['MathCAT'].readAloudAudio) {
           // pause current playback to allow new playback
           window['MathCAT'].readAloudAudio.pause();
-          removeHighlight(window['MathCAT'].readAloudCurrentMark, 'sync-highlight');
+          removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
           console.warn("paused playback");
         }
 
@@ -120,13 +123,33 @@
         const PITCH_CHANGE = "<prosody pitch='+90%'>$1</prosody>"
         text = text.replace(CAP_LETTER, PITCH_CHANGE);
         console.log("TTS:", text);
+        // It doesn't seem like I can specify a language and Polly pick the voice, so I'm hardcoding a voice mapping
+        langToVoice = {
+          "da": "Naja",
+          "de": "Vicki",
+          "en": "Joanna",
+          "es": "Lucia",
+          "fi": "Suvi",
+          "fr": "Léa",
+          // no id (Indonesian) voice
+          "is": "Dora",
+          "it": "Bianca",
+          "nb": "Ida",
+          "nl": "Laura",
+          "pl": "Ola",
+          "pt": "Vitoria",
+          "sv": "Astrid",
+          // no vi (Vietnamese) voice
+          "zh-cn": "Hiujin",
+          "zh-tw": "Zhiyu",
+        }
         // Create the JSON parameters for getSynthesizeSpeechUrl
         var speechParams = {
             OutputFormat: "json",
             Text: "<speak>" + text + "</speak>",
             TextType: "ssml",
             SpeechMarkTypes: ["ssml"],
-            VoiceId: "Joanna",
+            VoiceId: langToVoice[lang] || "Joanna",
             Engine: "standard",     // The neural engine currently does not support ssml marks
         };
 
@@ -184,7 +207,7 @@
                     window['MathCAT'].readAloudAudio.addEventListener(
                         'ended',
                         () => {
-                          removeHighlight(window['MathCAT'].readAloudCurrentMark, 'sync-highlight');
+                          removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
                           window['MathCAT'].readAloudAudio = null; // flag indicate not currently speaking
                         }
                     );
@@ -207,9 +230,9 @@
                                 }
                             }
                             if (window['MathCAT'].readAloudCurrentMark !== value) {
-                                removeHighlight(window['MathCAT'].readAloudCurrentMark, 'sync-highlight');
+                                removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
                                 window['MathCAT'].readAloudCurrentMark = value;
-                                highlightID( window['MathCAT'].readAloudCurrentMark, 'sync-highlight');
+                                highlightID( window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
                             }
                         }
                     );
@@ -224,57 +247,64 @@
         });
       }
 
-      function removeHighlight(id, className) {
+      const leafElements = ['mi', 'mn', 'mo', 'ms', 'mtext'];
+
+      function removeHighlight(id, offset, className) {
         if (id) {
           let element = document.getElementById(id);
           if (element) {
-            element.classList.remove(className);
+            if (offset > 0 && leafElements.includes(element.tagName.toLowerCase().replace('mjx-', ''))) {
+              // for leaf elements, we may have wrapped a span around the content
+              let span = element.querySelector('span.' + className);
+              if (span) {
+                span.replaceWith(...span.childNodes); // unwrap the span
+              }
+            } else {
+              element.classList.remove(className);
+            }
           }
         }
       }
 
-      function highlightID(id, className) {
+      function highlightID(id, offset, className) {
         let element = document.getElementById(id);
         if (element) {
-          element.classList.add(className);
+          if (offset > 0 && leafElements.includes(element.tagName.toLowerCase().replace('mjx-', ''))) {
+            // for leaf elements, wrap a span around the content
+            let range = document.createRange();
+            console.log("highlightID: wrapping span around ", element,  " at offset ", offset);
+            range.setStart(element, offset - 1);
+            range.setEnd(element, offset);
+            let span = document.createElement('span');
+            span.classList.add(className);
+            span.style.display = 'inline-block';
+            range.surroundContents(span);
+            console.log("highlightID: wrapped span around ", element, " at offset ", offset);
+          } else {
+            element.classList.add(className);
+            console.log("highlightID: added class to ", element);
+          }
         }
       }
     </script>
   <script type="module">
-    import {load_yaml_file} from '/MathCATDemo/index-11374d48db87e567.js';
+    import {load_yaml_file} from '/MathCATDemo/index-4bd23fa95c14eac.js';
     window.load_yaml_file = load_yaml_file; // put in global scope so it can be called from global scope functions
   </script>
 
-    <link rel="stylesheet" href="/MathCATDemo/index-2cf400b26753f95b.css">  
+    <link rel="stylesheet" href="/MathCATDemo/index-a52fa369754d3f06.css" integrity="sha384-+I4Bex4cCcMX4mQJsdhTl0IZBCLNw40HuM0C0K53gwFVAK8ie1RG/2K8Ds+VfTbL"/>  
     <!-- for debugging -->
-    <script type="module">import init from '/MathCATDemo/index-11374d48db87e567.js';init('/MathCATDemo/index-11374d48db87e567_bg.wasm');</script>  
+    
+<script type="module">
+import init, * as bindings from '/MathCATDemo/math_cat_demo-4bd23fa95c14eac.js';
+const wasm = await init({ module_or_path: '/MathCATDemo/math_cat_demo-4bd23fa95c14eac_bg.wasm' });
 
-<link rel="preload" href="/MathCATDemo/index-11374d48db87e567_bg.wasm" as="fetch" type="application/wasm" crossorigin="">
-<link rel="modulepreload" href="/MathCATDemo/index-11374d48db87e567.js"></head>
-<body><script>(function () {
-    var url = 'wss://' + window.location.host + '/_trunk/ws';
-    var poll_interval = 5000;
-    var reload_upon_connect = () => {
-        window.setTimeout(
-            () => {
-                // when we successfully reconnect, we'll force a
-                // reload (since we presumably lost connection to
-                // trunk due to it being killed, so it will have
-                // rebuilt on restart)
-                var ws = new WebSocket(url);
-                ws.onopen = () => window.location.reload();
-                ws.onclose = reload_upon_connect;
-            },
-            poll_interval);
-    };
 
-    var ws = new WebSocket(url);
-    ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data);
-        if (msg.reload) {
-            window.location.reload();
-        }
-    };
-    ws.onclose = reload_upon_connect;
-})()
-</script></body></html>
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>  
+<link rel="modulepreload" href="/MathCATDemo/math_cat_demo-4bd23fa95c14eac.js" crossorigin="anonymous" integrity="sha384-OeXvU+OmLNCZf+afwU6pNhYl4LT7oeX4KFVA1do9fp+lOyFUQ0PU632MbOQzBouv"><link rel="preload" href="/MathCATDemo/math_cat_demo-4bd23fa95c14eac_bg.wasm" crossorigin="anonymous" integrity="sha384-8JXUIirnjPNxmx+RYpbfxXuIYzbvZc2vn9818klHN3IdpWEfhjCK+N+HMH0nVpYq" as="fetch" type="application/wasm"></head>
+</html>
