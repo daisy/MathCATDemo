@@ -159,10 +159,6 @@
       return answer;
     }
 
-    function RustInit(str) {
-      eval(str);
-    }
-
     // For debugging, popup a file selector to reload the file instead of recompiling and waiting
     function GetFile() {
       var input = document.createElement('input');
@@ -174,16 +170,17 @@
         reader.readAsText(file,'UTF-8');
         reader.onload = readerEvent => {
             var content = readerEvent.target.result; // this is the content of the file
-            load_yaml_file(file.name, content );     // 'file.name' is only the last component (security reasons)
+            window.wasmBindings.load_yaml_file(file.name, content); // 'file.name' is only the last component (security reasons)
         }
       }
       input.click();  // triggers 'onchange'
     }
     </script>
     <script id="MathJax-script" async="" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
-    <!-- AWS Poly speech/sync highlighting stuff -->
-    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1033.0.min.js"></script>
     <script>
+      // Set after deploying lambda/tts (see lambda/tts/README.md). Empty disables playback.
+      // window.MATHCAT_TTS_API = '';
+      window.MATHCAT_TTS_API = 'https://uuxu1nom5k.execute-api.us-east-1.amazonaws.com/tts';
       window['MathCAT'] = {};
 
       // Function invoked by button click
@@ -200,132 +197,91 @@
           return;
         }
 
-        const CAP_LETTER = /(<say-as interpret-as='characters'>[A-Z]<\/say-as>)/g;
-        const PITCH_CHANGE = "<prosody pitch='+90%'>$1</prosody>"
-        text = text.replace(CAP_LETTER, PITCH_CHANGE);
         console.log("TTS:", text);
-        // It doesn't seem like I can specify a language and Polly pick the voice, so I'm hardcoding a voice mapping
-        langToVoice = {
-          "da": "Naja",
-          "de": "Vicki",
-          "en": "Joanna",
-          "es": "Lucia",
-          "fi": "Suvi",
-          "fr": "Léa",
-          // no id (Indonesian) voice
-          "is": "Dora",
-          "it": "Bianca",
-          "nb": "Ida",
-          "nl": "Laura",
-          "pl": "Ola",
-          "pt": "Vitoria",
-          "sv": "Astrid",
-          // no vi (Vietnamese) voice
-          "zh-cn": "Hiujin",
-          "zh-tw": "Zhiyu",
-        }
-        // Create the JSON parameters for getSynthesizeSpeechUrl
-        var speechParams = {
-            OutputFormat: "json",
-            Text: "<speak>" + text + "</speak>",
-            TextType: "ssml",
-            SpeechMarkTypes: ["ssml"],
-            VoiceId: langToVoice[lang] || "Joanna",
-            Engine: "standard",     // The neural engine currently does not support ssml marks
-        };
-
-        // Create the Polly service object and presigner object
-        speakTextWithPolly(speechParams);
+        speakTextWithProxy(text, lang);
       }
 
-      // the following is adapted from https://github.com/arnog/mathlive/blob/master/src/editor/speech-read-aloud.ts
-      function speakTextWithPolly(speechParams) {
-        var polly = new AWS.Polly({apiVersion: '2016-06-10'});
-        var signer = new AWS.Polly.Presigner(speechParams, polly);
-        polly.synthesizeSpeech(speechParams, (err, data) => {
-            if (err) {
-                console.warn('speakTextWithPolly error:', err, err.stack);
-                return;
-            }
-            if (!data || !data.AudioStream) {
-                return;
-            }
-            const response = new TextDecoder('utf-8').decode(
-                new Uint8Array(data.AudioStream)
-            );
-            // window['MathCAT'] = {};
-            window['MathCAT'].readAloudMarks = response
-                .split('\n')
-                .map((x) => (x ? JSON.parse(x) : {}));
-            window['MathCAT'].readAloudTokens = [];
+      function ensureReadAloudAudio() {
+        if (window['MathCAT'].readAloudAudio) {
+          window['MathCAT'].readAloudAudio.pause();
+          return;
+        }
+
+        window['MathCAT'].readAloudAudio = new Audio();
+        window['MathCAT'].readAloudAudio.addEventListener(
+          'ended',
+          () => {
+            removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
+            window['MathCAT'].readAloudAudio = null;
+          }
+        );
+        window['MathCAT'].readAloudAudio.addEventListener(
+          'timeupdate',
+          () => {
+            let value = '';
+            const target =
+              window['MathCAT'].readAloudAudio.currentTime * 1000 + 100;
+
             for (const mark of window['MathCAT'].readAloudMarks) {
-                if (mark.value) {
-                    window['MathCAT'].readAloudTokens.push(mark.value);
-                }
+              if (mark.time < target) {
+                value = mark.value;
+              }
             }
-            window['MathCAT'].readAloudCurrentMark = '';
+            if (window['MathCAT'].readAloudCurrentMark !== value) {
+              removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
+              window['MathCAT'].readAloudCurrentMark = value;
+              highlightID(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
+            }
+          }
+        );
+      }
 
-            // Request the audio
-            speechParams.OutputFormat = 'mp3';
-            speechParams.SpeechMarkTypes = [];
-            polly.synthesizeSpeech(speechParams, function (err, data) {
-                if (err) {
-                    console.warn('signer.synthesizeSpeech(' ,text, ') error:', err, err.stack);
-                    return;
-                }
-                if (!data || !data.AudioStream) {
-                    return;
-                }
-                const uInt8Array = new Uint8Array(data.AudioStream);
-                const blob = new Blob([uInt8Array.buffer], {
-                    type: 'audio/mpeg',
-                });
-                const url = URL.createObjectURL(blob);
+      function playReadAloudBlob(blob) {
+        ensureReadAloudAudio();
+        const url = URL.createObjectURL(blob);
+        window['MathCAT'].readAloudAudio.src = url;
+        window['MathCAT'].readAloudAudio.play();
+      }
 
-                if (!window['MathCAT'].readAloudAudio) {
+      // Adapted from https://github.com/arnog/mathlive/blob/master/src/editor/speech-read-aloud.ts
+      async function speakTextWithProxy(text, lang) {
+        const apiUrl = window.MATHCAT_TTS_API;
+        if (!apiUrl) {
+          console.warn('MATHCAT_TTS_API is not configured; speech playback disabled.');
+          return;
+        }
 
-                    window['MathCAT'].readAloudAudio = new Audio();
-                    window['MathCAT'].readAloudAudio.addEventListener(
-                        'ended',
-                        () => {
-                          removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
-                          window['MathCAT'].readAloudAudio = null; // flag indicate not currently speaking
-                        }
-                    );
-                    window['MathCAT'].readAloudAudio.addEventListener(
-                        'timeupdate',
-                        () => {
-                            let value = '';
-                            // The target, the atom we're looking for, is the one matching the current audio
-                            // plus 100 ms. By anticipating it a little bit, it feels more natural, otherwise it
-                            // feels like the highlighting is trailing the audio.
-                            const target =
-                                window['MathCAT'].readAloudAudio.currentTime *
-                                    1000 +
-                                100;
+        try {
+          const resp = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, lang }),
+          });
+          if (!resp.ok) {
+            console.warn('TTS proxy error:', resp.status, await resp.text());
+            return;
+          }
 
-                            // Find the smallest element which is bigger than the target time
-                            for (const mark of window['MathCAT'].readAloudMarks) {
-                                if (mark.time < target) {
-                                    value = mark.value;
-                                }
-                            }
-                            if (window['MathCAT'].readAloudCurrentMark !== value) {
-                                removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
-                                window['MathCAT'].readAloudCurrentMark = value;
-                                highlightID( window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
-                            }
-                        }
-                    );
-                } else {
-                    window['MathCAT'].readAloudAudio.pause();
-                }
+          const { marks, audioBase64, mimeType } = await resp.json();
+          window['MathCAT'].readAloudMarks = marks;
+          window['MathCAT'].readAloudTokens = [];
+          for (const mark of window['MathCAT'].readAloudMarks) {
+            if (mark.value) {
+              window['MathCAT'].readAloudTokens.push(mark.value);
+            }
+          }
+          window['MathCAT'].readAloudCurrentMark = '';
 
-                // finally, set up the audio source and play it, trigging the 'timeupdate' events.
-                window['MathCAT'].readAloudAudio.src = url;
-                window['MathCAT'].readAloudAudio.play();
-            });
-        });
+          const binary = atob(audioBase64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          const blob = new Blob([bytes], { type: mimeType || 'audio/mpeg' });
+          playReadAloudBlob(blob);
+        } catch (err) {
+          console.warn('speakTextWithProxy error:', err, err.stack);
+        }
       }
 
       const leafElements = ['mi', 'mn', 'mo', 'ms', 'mtext'];
@@ -368,17 +324,13 @@
         }
       }
     </script>
-  <script type="module">
-    import {load_yaml_file} from '/MathCATDemo/index-4881d6f898f6f1c6.js';
-    window.load_yaml_file = load_yaml_file; // put in global scope so it can be called from global scope functions
-  </script>
 
     <link rel="stylesheet" href="/MathCATDemo/index-a52fa369754d3f06.css" integrity="sha384-+I4Bex4cCcMX4mQJsdhTl0IZBCLNw40HuM0C0K53gwFVAK8ie1RG/2K8Ds+VfTbL"/>  
     <!-- for debugging -->
     
 <script type="module">
-import init, * as bindings from '/MathCATDemo/math_cat_demo-4881d6f898f6f1c6.js';
-const wasm = await init({ module_or_path: '/MathCATDemo/math_cat_demo-4881d6f898f6f1c6_bg.wasm' });
+import init, * as bindings from '/MathCATDemo/math_cat_demo-f758716f1daac5f0.js';
+const wasm = await init({ module_or_path: '/MathCATDemo/math_cat_demo-f758716f1daac5f0_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -387,5 +339,5 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>  
-<link rel="modulepreload" href="/MathCATDemo/math_cat_demo-4881d6f898f6f1c6.js" crossorigin="anonymous" integrity="sha384-GQN/gakKTgZjF7VCeDjQ44nrzRVazLWgAuqKQmnA/s7EhGJZuxXW7R5yEgHg3/mQ"><link rel="preload" href="/MathCATDemo/math_cat_demo-4881d6f898f6f1c6_bg.wasm" crossorigin="anonymous" integrity="sha384-42BRSvj23LlVsXAt+eoRhtRBZNOZIaaMop/Qr9f0HjWxkDaqIWaWTbS6LO/oxTT2" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/MathCATDemo/math_cat_demo-f758716f1daac5f0.js" crossorigin="anonymous" integrity="sha384-M1mfS8qVm8XqkoMCWrj+AOf9CURJdS3DlLm4x9mZs+hnPy9B6oL2rzuq5EPVuTGq"><link rel="preload" href="/MathCATDemo/math_cat_demo-f758716f1daac5f0_bg.wasm" crossorigin="anonymous" integrity="sha384-GHMR9Di+3kVG1JLOTy8/2hyXD2xhlCEpG4/QekQxn7NxMWO3/94dmYUtTSvRlDjK" as="fetch" type="application/wasm"></head>
 </html>
