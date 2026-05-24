@@ -5,7 +5,7 @@ Visit [the MathCAT project page](https://daisy.github.io/MathCAT/) for more info
 
 
 ## Local builds
-To build this and run locally, you need to download and install [trunk](https://docs.trunk.io/docs/install). Then type
+To build this and run locally, you need to download and install [trunk](https://trunkrs.dev/guide/getting-started/installation.html). Then type
 ```
 trunk serve
 ```
