@@ -1,0 +1,59 @@
+name: Deploy GitHub Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'index.html'
+      - 'index.scss'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Trunk.toml'
+      - 'logo.png'
+      - '.github/workflows/deploy-pages.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout demo
+        uses: actions/checkout@v4
+        with:
+          path: MathCATDemo
+
+      - name: Checkout MathCAT
+        uses: actions/checkout@v4
+        with:
+          repository: daisy/MathCAT
+          path: MathCAT
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: MathCATDemo
+
+      - name: Install Trunk
+        run: cargo install trunk --locked
+
+      - name: Build site
+        working-directory: MathCATDemo
+        run: trunk build
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: MathCATDemo/dist

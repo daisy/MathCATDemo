@@ -63,7 +63,7 @@ trunk serve
 
 Open the app, choose **SSML** under TTS, generate speech, and confirm audio plays with navigation highlighting.
 
-For GitHub Pages, build with `trunk build` and deploy `dist/` as described below. Set `MATHCAT_TTS_API` in `index.html` **before** `trunk build` so the URL is included in `dist/index.html`.
+For GitHub Pages, push frontend changes to `main`. The workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) runs `trunk build` and publishes `dist/` to the `gh-pages` branch automatically. Set `MATHCAT_TTS_API` in `index.html` on `main` before pushing so the built site includes the proxy URL.
 
 ### Switching engines later
 
@@ -73,30 +73,24 @@ Redeploy the Lambda with a different `TtsProvider` / `TTS_PROVIDER` and update c
 
 The live demo is at [daisy.github.io/MathCATDemo](https://daisy.github.io/MathCATDemo/). GitHub Pages serves the **`gh-pages`** branch (contents of `dist/`).
 
-**Two separate deploys:** GitHub Actions ([`.github/workflows/deploy-tts-lambda.yml`](.github/workflows/deploy-tts-lambda.yml)) updates only the **TTS Lambda** when `lambda/tts/**` changes. It does **not** build or publish the demo site. Pushing frontend changes to `main` does not update github.io until you publish `dist/` to `gh-pages` as below.
+**Automatic deploy:** Pushing frontend changes to `main` triggers [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml). It checks out [daisy/MathCAT](https://github.com/daisy/MathCAT) as a sibling crate (matching the local `path = "../MathCAT/"` dependency), runs `trunk build`, and pushes `dist/` to `gh-pages`.
 
-### Deploy steps
+**TTS Lambda deploy:** [`.github/workflows/deploy-tts-lambda.yml`](.github/workflows/deploy-tts-lambda.yml) is separate — it updates only the TTS backend when `lambda/tts/**` changes.
 
-1. **Configure TTS (optional).** To enable speech on the live site, set `window.MATHCAT_TTS_API` in `index.html` before building (see [Text-to-speech](#text-to-speech) above). Leave it as `''` to ship without playback.
+Set `window.MATHCAT_TTS_API` in `index.html` on `main` before pushing if you want speech on the live site (see [Text-to-speech](#text-to-speech)).
 
-2. **Stop `trunk serve`** if it is running so it does not overwrite `dist/` while you publish.
+### Manual deploy (optional)
 
-3. **Build the site:**
+If you need to publish without pushing to `main`:
 
-   ```bash
-   trunk build
-   ```
-
-   `Trunk.toml` sets `public_url = "/MathCATDemo/"`, which matches the GitHub Pages project URL.
-
-4. **Push `dist/` to `gh-pages`** ([subtree workflow](https://gist.github.com/cobyism/4730490)):
+1. **Stop `trunk serve`** if it is running.
+2. **Build:** `trunk build` (requires a sibling `../MathCAT/` checkout locally).
+3. **Publish:**
 
    ```bash
-   git add dist
-   git commit -m "Update GitHub Pages build"
    git subtree push --prefix dist origin gh-pages
    ```
 
-5. **Verify** at [daisy.github.io/MathCATDemo](https://daisy.github.io/MathCATDemo/). If TTS is enabled, confirm speech plays with sync highlighting.
+4. **Verify** at [daisy.github.io/MathCATDemo](https://daisy.github.io/MathCATDemo/).
 
-For local testing before publish, use `http://localhost:8080/MathCATDemo/` so browser requests match the Lambda CORS allowlist.
+For local testing, use `http://localhost:8080/MathCATDemo/` (trailing slash required) so browser requests match the Lambda CORS allowlist.

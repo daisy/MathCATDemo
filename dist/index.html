@@ -170,7 +170,7 @@
         reader.readAsText(file,'UTF-8');
         reader.onload = readerEvent => {
             var content = readerEvent.target.result; // this is the content of the file
-            load_yaml_file(file.name, content );     // 'file.name' is only the last component (security reasons)
+            window.wasmBindings.load_yaml_file(file.name, content); // 'file.name' is only the last component (security reasons)
         }
       }
       input.click();  // triggers 'onchange'
@@ -179,8 +179,8 @@
     <script id="MathJax-script" async="" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
     <script>
       // Set after deploying lambda/tts (see lambda/tts/README.md). Empty disables playback.
-      window.MATHCAT_TTS_API = '';
-      // window.MATHCAT_TTS_API = 'https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/tts';
+      // window.MATHCAT_TTS_API = '';
+      window.MATHCAT_TTS_API = 'https://uuxu1nom5k.execute-api.us-east-1.amazonaws.com/tts';
       window['MathCAT'] = {};
 
       // Function invoked by button click
@@ -324,17 +324,13 @@
         }
       }
     </script>
-  <script type="module">
-    import {load_yaml_file} from '/MathCATDemo/index-844b68763f8ae55f.js';
-    window.load_yaml_file = load_yaml_file; // put in global scope so it can be called from global scope functions
-  </script>
 
     <link rel="stylesheet" href="/MathCATDemo/index-a52fa369754d3f06.css" integrity="sha384-+I4Bex4cCcMX4mQJsdhTl0IZBCLNw40HuM0C0K53gwFVAK8ie1RG/2K8Ds+VfTbL"/>  
     <!-- for debugging -->
     
 <script type="module">
-import init, * as bindings from '/MathCATDemo/math_cat_demo-b650f060e9c578f1.js';
-const wasm = await init({ module_or_path: '/MathCATDemo/math_cat_demo-b650f060e9c578f1_bg.wasm' });
+import init, * as bindings from '/MathCATDemo/math_cat_demo-a8ff89de0967b146.js';
+const wasm = await init({ module_or_path: '/MathCATDemo/math_cat_demo-a8ff89de0967b146_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -343,5 +339,5 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>  
-<link rel="modulepreload" href="/MathCATDemo/math_cat_demo-b650f060e9c578f1.js" crossorigin="anonymous" integrity="sha384-1Fs68yXvpxmQdIs9PFdmM6m/qo+yMs+nZSVzfwYuKM+5lBWgeiU/uEeAsr3DzTUg"><link rel="preload" href="/MathCATDemo/math_cat_demo-b650f060e9c578f1_bg.wasm" crossorigin="anonymous" integrity="sha384-pkOHDzVfOv/iXajJe/duwNyPj7PR/HNfopNnw8Bsz4u0mamg4563d2mjMcdYDYIc" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/MathCATDemo/math_cat_demo-a8ff89de0967b146.js" crossorigin="anonymous" integrity="sha384-1Fs68yXvpxmQdIs9PFdmM6m/qo+yMs+nZSVzfwYuKM+5lBWgeiU/uEeAsr3DzTUg"><link rel="preload" href="/MathCATDemo/math_cat_demo-a8ff89de0967b146_bg.wasm" crossorigin="anonymous" integrity="sha384-k6hdjGiyG5zdfYhOVsKcf86bBRCWkfbKjrjq8O3tMleU3UoGPq+dGCB/7UFqgdFw" as="fetch" type="application/wasm"></head>
 </html>
