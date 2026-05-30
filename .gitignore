@@ -1,3 +1,4 @@
+Cargo.lock
 /target/
 /dist/
 lambda/tts/node_modules/
