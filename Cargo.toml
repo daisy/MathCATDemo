@@ -1,7 +1,7 @@
 [package]
 name = "math_cat_demo"
 version = "0.3.0"
-edition = "2018"
+edition = "2024"
 
 
 [dependencies]
