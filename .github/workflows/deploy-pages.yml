@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - 'src/**'
-      - 'index.html'
-      - 'index.scss'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'Trunk.toml'
-      - 'logo.png'
-      - '.github/workflows/deploy-pages.yml'
+    # paths:
+    #   - 'src/**'
+    #   - 'index.html'
+    #   - 'index.scss'
+    #   - 'Cargo.toml'
+    #   - 'Cargo.lock'
+    #   - 'Trunk.toml'
+    #   - 'logo.png'
+    #   - '.github/workflows/deploy-pages.yml'
 
 permissions:
   contents: write
