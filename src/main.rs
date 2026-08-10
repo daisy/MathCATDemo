@@ -40,7 +40,7 @@ enum Msg {
     SpeechStyle(&'static str),
     SpeechVerbosity(&'static str),
     SayCaps(&'static str),
-    BrailleCode(&'static str),
+    BrailleCode(String),
     BrailleDisplayAs(&'static str),
     TTS(&'static str),
     Dots(&'static str),
@@ -64,6 +64,7 @@ struct Model {
     nav_id: String,
     nav_offset: usize,
     braille_code: String,
+    supported_braille_codes: Vec<String>,
     braille_display_as: String,
     braille_dots78: String,
     braille: String,
@@ -263,6 +264,7 @@ impl Component for Model {
             nav_offset: 0,
             braille_dots78: "EndPoints".to_string(),
             braille_code: "Nemeth".to_string(),
+            supported_braille_codes: Vec::new(),
             braille_display_as: "Dots".to_string(),
             braille: String::default(),
             braille_node_ref: NodeRef::default(),
@@ -277,6 +279,10 @@ impl Component for Model {
             error!("Didn't find rules dir: {}", e.to_string());
         };
         set_preference("CheckRuleFiles".to_string(), "None".to_string()).unwrap();
+        match get_supported_braille_codes() {
+            Ok(codes) => initial_state.supported_braille_codes = codes,
+            Err(e) => error!("Failed to get supported braille codes: {}", e),
+        }
         initial_state.apply_loaded_preferences();
 
         return initial_state;
@@ -358,7 +364,7 @@ impl Component for Model {
                 self.update_speech = true;
             },
             Msg::BrailleCode(text) => {
-                self.braille_code = text.to_string();
+                self.braille_code = text;
                 self.update_braille = true;
             },
             Msg::BrailleDisplayAs(text) => {
@@ -444,7 +450,7 @@ impl Component for Model {
                 </div>
                 <h2>
                     {"Displayed Math (click to navigate, ESC to exit ["}
-                    <a href="https://docs.wiris.com/en/mathplayer/navigation_commands" target="_blank" rel="noreferrer">{"nav help"}</a>
+                    <a href="https://daisy.github.io/MathCAT/nav-commands.html" target="_blank" rel="noreferrer">{"nav help"}</a>
                     {"])"}
                 </h2>
                 <table role="presentation"><tr> // 2x3 table on left
@@ -559,15 +565,18 @@ impl Component for Model {
                 <h2 id="braille-heading">{"Braille"}</h2>
                 <table role="presentation"><tr>     // 1x2 outside table
                     <td><table role="presentation"><tr>
-                        <td>{"Braille Settings:"}</td>
-                        <td><input type="radio" id="Nemeth" name="braille_setting"
-                                checked = {self.braille_code == "Nemeth"}
-                                onclick=self.link.callback(|_| Msg::BrailleCode("Nemeth"))/>
-                            <label for="Nemeth">{"Nemeth"}</label></td>
-                        <td><input type="radio" id="UEB" name="braille_setting" value="UEB"
-                                checked = {self.braille_code == "UEB"}
-                                onclick=self.link.callback(|_| Msg::BrailleCode("UEB"))/>
-                            <label for="UEB">{"UEB"}</label></td>
+                        <td><label for="braille_code">{"Braille Settings:"}</label></td>
+                        <td colspan="2"><span class="select"><select name="braille_code" id="braille_code"
+                                onchange=self.link.callback(|e: ChangeData| match e {
+                                    ChangeData::Select(select) => Msg::BrailleCode(select.value()),
+                                    _ => Msg::BrailleCode("Nemeth".to_string()),
+                                })>
+                            { for self.supported_braille_codes.iter().map(|code| {
+                                html! {
+                                    <option value={code.clone()} selected={self.braille_code == *code}>{code}</option>
+                                }
+                            }) }
+                        </select></span></td>
                     </tr><tr>
                         <td>{"View Braille As:"}</td>
                         <td><input type="radio" id="Dots" name="view_braille_as" value="Dots"
