@@ -22,10 +22,12 @@ phf = { version = "0.13", features = ["macros"] }
 # mathcat = { version = "0.6.3", features = ["include-zip"]}
 
 [dependencies.mathcat]
-version = "0.7.6-beta.9"
+# Local and CI both use a sibling checkout at ../MathCAT/ (see deploy-pages.yml).
+# Locally: keep that clone on branch braille-parser.
+# On GitHub Actions: workflow checks out daisy/MathCAT@braille-parser there.
 features = ["include-zip"]
-# for testing MathCAT without having to publish a new version 
-# path = "../MathCAT/"
+path = "../MathCAT/"
+# version = "0.7.6-beta.9"
 
 
 

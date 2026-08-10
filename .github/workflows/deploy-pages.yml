@@ -3,27 +3,21 @@ name: Deploy GitHub Pages
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    # paths:
-    #   - 'src/**'
-    #   - 'index.html'
-    #   - 'index.scss'
-    #   - 'Cargo.toml'
-    #   - 'Cargo.lock'
-    #   - 'Trunk.toml'
-    #   - 'logo.png'
-    #   - '.github/workflows/deploy-pages.yml'
+    branches: [main, ueb-parser]
 
 permissions:
   contents: write
 
 concurrency:
+  # Serialize deploys so main (site root) and ueb-parser (input/) don't race on gh-pages.
   group: github-pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      IS_INPUT_DEMO: ${{ github.ref_name == 'ueb-parser' }}
     steps:
       - name: Checkout demo
         uses: actions/checkout@v4
@@ -34,6 +28,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: daisy/MathCAT
+          # ueb-parser demo builds against braille-parser; main uses MathCAT main.
+          ref: ${{ github.ref_name == 'ueb-parser' && 'braille-parser' || 'main' }}
           path: MathCAT
 
       - name: Install Rust toolchain
@@ -50,10 +46,26 @@ jobs:
 
       - name: Build site
         working-directory: MathCATDemo
-        run: trunk build
+        run: |
+          if [ "$IS_INPUT_DEMO" = "true" ]; then
+            trunk build --public-url /MathCATDemo/input/
+          else
+            trunk build --public-url /MathCATDemo/
+          fi
 
-      - name: Deploy to gh-pages
+      - name: Deploy to gh-pages (input/)
+        if: env.IS_INPUT_DEMO == 'true'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: MathCATDemo/dist
+          destination_dir: input
+
+      - name: Deploy to gh-pages (site root)
+        if: env.IS_INPUT_DEMO != 'true'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: MathCATDemo/dist
+          # Preserve /input from the ueb-parser deploy.
+          keep_files: true
