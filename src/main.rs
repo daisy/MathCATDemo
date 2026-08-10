@@ -33,7 +33,9 @@ enum Msg {
     NewMathML,
     MathReady {
         math_string: String,
+        auto_speak: bool,
     },
+    UebBrailleInput(String),
     NavMode(&'static str),
     NavVerbosity(&'static str),
     Language(&'static str),
@@ -61,6 +63,7 @@ struct Model {
     say_caps: bool,
     speech: String,
     speak: bool,
+    auto_speak: bool,
     nav_id: String,
     nav_offset: usize,
     braille_code: String,
@@ -69,6 +72,8 @@ struct Model {
     braille_dots78: String,
     braille: String,
     braille_node_ref: NodeRef,
+    ueb_braille_input: String,
+    ueb_braille_error: String,
     tts: String,
 
     update_speech: bool,
@@ -134,12 +139,51 @@ static INPUT_MESSAGE: &'static str = "Auto-detect format: override using $...$ f
 static START_FORMULA: &'static str = r"$x = {-b \pm \sqrt{b^2-4ac} \over 2a}$";
 // static START_FORMULA: &'static str = r"$x = {t \over 2a}$";
 
+/// North American ASCII braille: index is (Unicode braille - 0x2800) & 0x3F.
+static UNICODE_TO_ASCII_BRAILLE: &str =
+    " A1B'K2L@CIF/MSP\"E3H9O6R^DJG>NTQ,*5<-U8V.%[$+X!&;:4\\0Z7(_?W]#Y)=";
+
 enum PendingMath {
     Convert { content: String, format: &'static str },
     AlreadyMathML(String),
 }
 
 static MATH_ERROR: &str = "Unrecognized Math -- use $...$ for TeX, `...` for ASCIIMath, or enter MathML";
+
+fn is_unicode_braille_text(s: &str) -> bool {
+    s.chars().all(|c| {
+        let u = c as u32;
+        (0x2800..=0x28FF).contains(&u) || c.is_whitespace()
+    })
+}
+
+/// Map North American ASCII braille to Unicode braille cells (U+2800..).
+fn ascii_braille_to_unicode(ascii: &str) -> String {
+    lazy_static! {
+        static ref ASCII_TO_UNICODE: std::collections::HashMap<char, char> = {
+            let mut map = std::collections::HashMap::with_capacity(128);
+            for (i, ch) in UNICODE_TO_ASCII_BRAILLE.chars().enumerate() {
+                let unicode = char::from_u32(0x2800 + i as u32).unwrap();
+                map.insert(ch, unicode);
+                if ch.is_ascii_uppercase() {
+                    map.insert(ch.to_ascii_lowercase(), unicode);
+                }
+            }
+            map
+        };
+    }
+    ascii.chars()
+        .map(|c| ASCII_TO_UNICODE.get(&c).copied().unwrap_or(c))
+        .collect()
+}
+
+fn ensure_unicode_braille(input: &str) -> String {
+    if is_unicode_braille_text(input) {
+        input.to_string()
+    } else {
+        ascii_braille_to_unicode(input)
+    }
+}
 
 async fn convert_and_render_math(pending: PendingMath) -> String {
     let mut mathml = match pending {
@@ -203,7 +247,8 @@ fn update_speech_and_braille(component: &mut Model) {
         };
 
         component.speech = speech;
-        component.speak = true;  
+        component.speak = component.auto_speak;
+        component.auto_speak = true;
         component.update_speech = false;  
     }
 
@@ -222,7 +267,7 @@ fn update_speech_and_braille(component: &mut Model) {
         if component.braille_display_as == "ASCIIBraille" {
             lazy_static! {
                 static ref UNICODE_TO_ASCII: Vec<char> =
-                    " A1B'K2L@CIF/MSP\"E3H9O6R^DJG>NTQ,*5<-U8V.%[$+X!&;:4\\0Z7(_?W]#Y)=".chars().collect();
+                    UNICODE_TO_ASCII_BRAILLE.chars().collect();
             };
     
             let mut result = String::with_capacity(braille.len());
@@ -268,10 +313,13 @@ impl Component for Model {
             braille_display_as: "Dots".to_string(),
             braille: String::default(),
             braille_node_ref: NodeRef::default(),
+            ueb_braille_input: String::default(),
+            ueb_braille_error: String::default(),
             tts: "SSML".to_string(),
 
             update_speech: true,
             update_braille: true,
+            auto_speak: true,
         };
         
         initial_state.init_state_from_cookies();
@@ -327,17 +375,54 @@ impl Component for Model {
                     let link = self.link.clone();
                     spawn_local(async move {
                         let math_string = convert_and_render_math(pending).await;
-                        link.send_message(Msg::MathReady { math_string });
+                        link.send_message(Msg::MathReady { math_string, auto_speak: true });
                     });
                 };
                 return false;
             },
-            Msg::MathReady { math_string } => {
+            Msg::MathReady { math_string, auto_speak } => {
                 self.math_string = math_string;
                 self.nav_id = "".to_string();
                 self.nav_offset = 0;
                 self.update_braille = true;
                 self.update_speech = true;
+                self.auto_speak = auto_speak;
+            },
+            Msg::UebBrailleInput(text) => {
+                self.ueb_braille_input = text.clone();
+                if text.trim().is_empty() {
+                    self.ueb_braille_error.clear();
+                    return true;
+                }
+
+                self.braille_code = "UEB".to_string();
+                if let Err(e) = set_preference("BrailleCode".to_string(), "UEB".to_string()) {
+                    error!("Failed to set BrailleCode to UEB: {}", e);
+                }
+
+                let unicode_braille = ensure_unicode_braille(text.trim());
+                match set_mathml_from_braille(&unicode_braille) {
+                    Ok(mathml) => {
+                        self.ueb_braille_error.clear();
+                        let link = self.link.clone();
+                        spawn_local(async move {
+                            let math_string = convert_and_render_math(
+                                PendingMath::AlreadyMathML(mathml),
+                            )
+                            .await;
+                            link.send_message(Msg::MathReady {
+                                math_string,
+                                auto_speak: false,
+                            });
+                        });
+                        return false;
+                    }
+                    Err(e) => {
+                        let message = errors_to_string(&e);
+                        error!("UEB braille input error: {}", message);
+                        self.ueb_braille_error = message;
+                    }
+                }
             },
             Msg::NavMode(text) => {
                 self.nav_mode = text.to_string();
@@ -447,6 +532,18 @@ impl Component for Model {
                 <div>
                 <input type="button" value="Generate Speech and Braille" id="render-button"
                     onclick=self.link.callback(|_| Msg::NewMathML) />
+                </div>
+                <div>
+                    <label for="ueb-braille-input">{"UEB Braille Input: "}</label>
+                    <input type="text" id="ueb-braille-input" size="80" autocorrect="off"
+                        value={self.ueb_braille_input.clone()}
+                        aria-describedby="ueb-braille-error"
+                        oninput=self.link.callback(|e: InputData| Msg::UebBrailleInput(e.value)) />
+                </div>
+                <div id="ueb-braille-error-row" aria-live="assertive">
+                    <label for="ueb-braille-error">{"UEB Braille Error: "}</label>
+                    <input type="text" id="ueb-braille-error" size="80" readonly=true
+                        value={self.ueb_braille_error.clone()} />
                 </div>
                 <h2>
                     {"Displayed Math (click to navigate, ESC to exit ["}

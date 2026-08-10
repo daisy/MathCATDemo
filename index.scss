@@ -34,6 +34,16 @@ h2:first-child {
   margin-left: auto;
   margin-right: auto
 }
+#ueb-braille-error-row {
+  margin-top: 1ex;
+}
+#ueb-braille-error {
+  color: red;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0;
+}
 #mathml-output {
     font-size: 110%;
     margin-top: 0em;
