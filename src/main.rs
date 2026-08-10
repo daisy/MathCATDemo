@@ -562,11 +562,11 @@ impl Component for Model {
                 <textarea role="application" id="speech" aria-labelledby="speech-heading" readonly=true rows="3" cols="80" data-hint="" autocorrect="off">
                     {&self.speech}
                 </textarea>
-                <h2 id="braille-heading">{"Braille"}</h2>
-                <table role="presentation"><tr>     // 1x2 outside table
-                    <td><table role="presentation"><tr>
-                        <td><label for="braille_code">{"Braille Settings:"}</label></td>
-                        <td colspan="2"><span class="select"><select name="braille_code" id="braille_code"
+                <table id="braille-table" role="presentation">
+                    <tr>
+                        <td><h2 id="braille-heading">{"Braille"}</h2></td>
+                        <td colspan="3"><label for="braille_code">{"Braille Code: "}</label>
+                            <span class="select"><select name="braille_code" id="braille_code"
                                 onchange=self.link.callback(|e: ChangeData| match e {
                                     ChangeData::Select(select) => Msg::BrailleCode(select.value()),
                                     _ => Msg::BrailleCode("Nemeth".to_string()),
@@ -576,7 +576,8 @@ impl Component for Model {
                                     <option value={code.clone()} selected={self.braille_code == *code}>{code}</option>
                                 }
                             }) }
-                        </select></span></td>
+                            </select></span>
+                        </td>
                     </tr><tr>
                         <td>{"View Braille As:"}</td>
                         <td><input type="radio" id="Dots" name="view_braille_as" value="Dots"
@@ -588,11 +589,8 @@ impl Component for Model {
                                 onclick=self.link.callback(|_| Msg::BrailleDisplayAs("ASCIIBraille"))/>
                                 <label for="ASCIIBraille">{"ASCIIBraille"}</label>
                         </td>
-                    </tr></table></td>
-                    <td><table role="presentation"><tr> // 1x2 table on right
-                        <td>{"\u{A0}"}</td> // empty row to get alignment right
-                        </tr> <tr>
-                        <td>{"\u{A0}\u{A0}\u{A0}Navigation Indicator:"}</td>
+                        <td/>
+                        <td class="next-group">{"Navigation Indicator:"}</td>
                         <td><input type="radio" id="DotsOff" name="dots-78"
                                 checked = {self.braille_dots78 == "Off"}
                                 onclick=self.link.callback(|_| Msg::Dots("Off"))/>
@@ -609,8 +607,8 @@ impl Component for Model {
                                 checked = {self.braille_dots78 == "All"}                           
                                 onclick=self.link.callback(|_| Msg::Dots("All"))/>
                             <label for="DotsAll">{"All"}</label></td>
-                    </tr> </table></td>
-                </tr></table>
+                    </tr>
+                </table>
                 <div role="region" aria-labelledby="braille-heading" id="braille" readonly=true rows="2" cols="80" data-hint="" autocorrect="off"
                     ref={self.braille_node_ref.clone()}>
                 </div>

@@ -13,6 +13,11 @@ h2:first-child {
 .next-group {
   padding-left: 3em;
 }
+#speech-table > tbody > tr > td:first-child,
+#braille-table > tbody > tr > td:first-child {
+  min-width: 11em;
+  white-space: nowrap;
+}
 #mathml-input {
   font-family: monospace;
   font-size: 100%;
