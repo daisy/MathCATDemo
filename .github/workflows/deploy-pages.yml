@@ -2,6 +2,15 @@ name: Deploy GitHub Pages
 
 on:
   workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: Where to publish the build
+        required: true
+        type: choice
+        options:
+          - input
+          - root
+        default: input
   push:
     branches: [main, ueb-parser]
   # Fired by daisy/MathCAT after a successful braille-parser build (see MathCAT rust.yml).
@@ -20,15 +29,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      # ueb-parser pushes and MathCAT braille-parser updates both publish under /input/.
-      IS_INPUT_DEMO: ${{ github.ref_name == 'ueb-parser' || github.event_name == 'repository_dispatch' }}
+      # input/: ueb-parser pushes, MathCAT braille-parser dispatch, or manual "input" run.
+      IS_INPUT_DEMO: ${{ github.ref_name == 'ueb-parser' || github.event_name == 'repository_dispatch' || (github.event_name == 'workflow_dispatch' && inputs.deploy_target == 'input') }}
     steps:
       - name: Checkout demo
         uses: actions/checkout@v4
         with:
-          # repository_dispatch always uses the workflow from the default branch;
-          # still check out ueb-parser so the input demo sources are used.
-          ref: ${{ github.event_name == 'repository_dispatch' && 'ueb-parser' || github.ref }}
+          # For input deploys, use ueb-parser sources even if the workflow file came from main.
+          ref: ${{ env.IS_INPUT_DEMO == 'true' && 'ueb-parser' || github.ref }}
           path: MathCATDemo
 
       - name: Checkout MathCAT
@@ -36,7 +44,7 @@ jobs:
         with:
           repository: daisy/MathCAT
           # Input demo builds against braille-parser; main site uses MathCAT main.
-          ref: ${{ (github.ref_name == 'ueb-parser' || github.event_name == 'repository_dispatch') && 'braille-parser' || 'main' }}
+          ref: ${{ env.IS_INPUT_DEMO == 'true' && 'braille-parser' || 'main' }}
           path: MathCAT
 
       - name: Install Rust toolchain
