@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MathCAT Demo</title>
+
+    <!-- MathJax-related stuff -->
+    <script>
+    MathJax = {
+      loader: {load: ['input/tex', '[tex]/mhchem', 'input/asciimath', '[mml]/mml3', 'a11y/assistive-mml']},
+      tex: {packages: {'[+]': ['mhchem']}},
+      mml: {parseAs: 'xml'},
+      startup: {
+        typeset: false, // demo converts math manually, not via page typeset
+        ready() {
+          MathJax.startup.defaultReady();
+          // combined component loads a11y extensions after config; disable their pipeline
+          const disabled = ['enrich', 'attachSpeech', 'complexity', 'explorable', 'addMenu', 'getMenu', 'checkLoading'];
+          for (const id of disabled) {
+            MathJax.startup.document.renderActions[id] = [];
+          }
+        },
+      },
+      options: {
+        enableMenu: false, // interferes with navigation
+        enableAssistiveMml: true, // hidden MathML for MathCAT/screen readers
+        enableEnrichment: false,   // disable SRE semantic enrichment
+        enableSpeech: false,       // disable SRE speech strings
+        enableBraille: false,      // disable SRE Braille labels
+        enableExplorer: false,     // disable MathJax expression explorer
+        enableComplexity: false,
+        // menuOptions.settings control a11y when the combined component loads ui/menu
+        menuOptions: {
+          settings: {
+            showSRE: false,       // omit data-semantic-* attributes from output
+            enrich: false,
+            speech: false,
+            braille: false,
+            collapsible: false,
+            assistiveMml: true,
+          },
+        },
+        // typesetPromise and convert functions use renderActions
+        renderActions: {
+          enrich: [],
+          attachSpeech: [],
+          complexity: [],
+          explorable: [],
+          addMenu: [],
+          getMenu: [],
+          checkLoading: [],
+        },
+        a11y: {
+          speech: false,
+          braille: false,
+          voicing: false,
+          subtitles: false,
+          viewBraille: false,
+          help: false,
+        },
+      }
+    };
+
+    const MATH_DISPLAY_ID = 'math-display';
+
+    function findNavigationElement(id) {
+      const output = document.getElementById('mathml-output');
+      if (!output || !id) {
+        return null;
+      }
+      for (const element of output.querySelectorAll('[id]')) {
+        if (element.id === id && !element.closest('mjx-assistive-mml')) {
+          return element;
+        }
+      }
+      return null;
+    }
+
+    // Convert MathML, TeX (properly delimitated), and ASCIIMath (properly delimitated)
+    async function ConvertToMathML(math_str, math_format) {
+      await MathJax.startup.promise;
+      let options = {display: true};
+      let mathml;
+      try {
+        if (math_format == 'ASCIIMath') {
+          mathml = await MathJax.asciimath2mmlPromise(math_str, options);
+        } else if (math_format == 'TeX') {
+          mathml = await MathJax.tex2mmlPromise(math_str, options);
+        } else {  // should be "MathML"
+          mathml = await MathJax.mathml2mmlPromise(math_str, options);
+        };
+      } catch (e) {
+        console.error("MathJax conversion error: ", e);
+        mathml = "<math><merror><mtext>MathJax conversion error</mtext></merror></math>"
+      }
+      console.log("ConvertToMathML:\n" + mathml.toString());
+      return mathml;
+    }
+
+    // Insert canonical MathML and run MathJax's regular typeset pipeline
+    async function TypesetMathML(mathml) {
+      await MathJax.startup.promise;
+      const container = document.getElementById(MATH_DISPLAY_ID);
+      if (!container) {
+        throw new Error('math-display container not found');
+      }
+      MathJax.typesetClear([container]);
+      container.innerHTML = mathml;
+      await MathJax.typesetPromise([container]);
+    }
+
+    async function ShowMathError(message) {
+      await MathJax.startup.promise;
+      const container = document.getElementById(MATH_DISPLAY_ID);
+      if (!container) {
+        return;
+      }
+      MathJax.typesetClear([container]);
+      container.textContent = message;
+    }
+
+    // helper function because Rust-side wasn't working per docs
+    function GetTextOfElement(id) {
+      let element = document.getElementById(id);
+      if (element) {
+        return element.value;
+      } else {
+        return "";
+      }
+    }
+
+    function HighlightNavigationElement(id, offset) {
+      const apply = () => {
+        if (window['MathCAT'].navMark) {
+          removeHighlight(window['MathCAT'].navMark, window['MathCAT'].navMarkOffset, 'nav-highlight');
+        }
+        window['MathCAT'].navMark = id;
+        window['MathCAT'].navMarkOffset = offset;
+        highlightID(id, offset, 'nav-highlight');
+      };
+      // defer until after Yew re-render from navigation updates the speech pane
+      requestAnimationFrame(apply);
+    }
+
+    function RemoveFocus(id) {
+      document.getElementById(id).dispatchEvent( new Event("focusout") )
+    }
+
+    function SetCookie(cookie_value) {
+      let answer = document.cookie;
+      if (cookie_value) {
+        for (const entry of cookie_value.split(";")) {
+          const trimmed = entry.trim();
+          if (trimmed) {
+            document.cookie = trimmed + "; max-age=31536000; SameSite=Lax";
+          }
+        }
+      }
+      return answer;
+    }
+
+    // For debugging, popup a file selector to reload the file instead of recompiling and waiting
+    function GetFile() {
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.accept='.yaml';
+      input.onchange = e => { 
+        var file = e.target.files[0]; 
+        var reader = new FileReader();
+        reader.readAsText(file,'UTF-8');
+        reader.onload = readerEvent => {
+            var content = readerEvent.target.result; // this is the content of the file
+            window.wasmBindings.load_yaml_file(file.name, content); // 'file.name' is only the last component (security reasons)
+        }
+      }
+      input.click();  // triggers 'onchange'
+    }
+    </script>
+    <script id="MathJax-script" async="" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+    <script>
+      // Set after deploying lambda/tts (see lambda/tts/README.md). Empty disables playback.
+      // window.MATHCAT_TTS_API = '';
+      window.MATHCAT_TTS_API = 'https://uuxu1nom5k.execute-api.us-east-1.amazonaws.com/tts';
+      window['MathCAT'] = {};
+
+      // Function invoked by button click
+      function SpeakText(text, lang) {
+        if (window['MathCAT'].readAloudAudio) {
+          // pause current playback to allow new playback
+          window['MathCAT'].readAloudAudio.pause();
+          removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
+          console.warn("paused playback");
+        }
+
+        // empty text is a way of stopping speech
+        if (!text) {
+          return;
+        }
+
+        console.log("TTS:", text);
+        speakTextWithProxy(text, lang);
+      }
+
+      function ensureReadAloudAudio() {
+        if (window['MathCAT'].readAloudAudio) {
+          window['MathCAT'].readAloudAudio.pause();
+          return;
+        }
+
+        window['MathCAT'].readAloudAudio = new Audio();
+        window['MathCAT'].readAloudAudio.addEventListener(
+          'ended',
+          () => {
+            removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
+            window['MathCAT'].readAloudAudio = null;
+          }
+        );
+        window['MathCAT'].readAloudAudio.addEventListener(
+          'timeupdate',
+          () => {
+            let value = '';
+            const target =
+              window['MathCAT'].readAloudAudio.currentTime * 1000 + 100;
+
+            for (const mark of window['MathCAT'].readAloudMarks) {
+              if (mark.time < target) {
+                value = mark.value;
+              }
+            }
+            if (window['MathCAT'].readAloudCurrentMark !== value) {
+              removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
+              window['MathCAT'].readAloudCurrentMark = value;
+              highlightID(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
+            }
+          }
+        );
+      }
+
+      function playReadAloudBlob(blob) {
+        ensureReadAloudAudio();
+        const url = URL.createObjectURL(blob);
+        window['MathCAT'].readAloudAudio.src = url;
+        window['MathCAT'].readAloudAudio.play();
+      }
+
+      // Adapted from https://github.com/arnog/mathlive/blob/master/src/editor/speech-read-aloud.ts
+      async function speakTextWithProxy(text, lang) {
+        const apiUrl = window.MATHCAT_TTS_API;
+        if (!apiUrl) {
+          console.warn('MATHCAT_TTS_API is not configured; speech playback disabled.');
+          return;
+        }
+
+        try {
+          const resp = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, lang }),
+          });
+          if (!resp.ok) {
+            console.warn('TTS proxy error:', resp.status, await resp.text());
+            return;
+          }
+
+          const { marks, audioBase64, mimeType } = await resp.json();
+          window['MathCAT'].readAloudMarks = marks;
+          window['MathCAT'].readAloudTokens = [];
+          for (const mark of window['MathCAT'].readAloudMarks) {
+            if (mark.value) {
+              window['MathCAT'].readAloudTokens.push(mark.value);
+            }
+          }
+          window['MathCAT'].readAloudCurrentMark = '';
+
+          const binary = atob(audioBase64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          const blob = new Blob([bytes], { type: mimeType || 'audio/mpeg' });
+          playReadAloudBlob(blob);
+        } catch (err) {
+          console.warn('speakTextWithProxy error:', err, err.stack);
+        }
+      }
+
+      const leafElements = ['mi', 'mn', 'mo', 'ms', 'mtext'];
+
+      function removeHighlight(id, offset, className) {
+        if (id) {
+          let element = findNavigationElement(id);
+          if (element) {
+            if (offset > 0 && leafElements.includes(element.tagName.toLowerCase().replace('mjx-', ''))) {
+              // for leaf elements, we may have wrapped a span around the content
+              let span = element.querySelector('span.' + className);
+              if (span) {
+                span.replaceWith(...span.childNodes); // unwrap the span
+              }
+            } else {
+              element.classList.remove(className);
+            }
+          }
+        }
+      }
+
+      function highlightID(id, offset, className) {
+        let element = findNavigationElement(id);
+        if (element) {
+          if (offset > 0 && leafElements.includes(element.tagName.toLowerCase().replace('mjx-', ''))) {
+            // for leaf elements, wrap a span around the content
+            let range = document.createRange();
+            console.log("highlightID: wrapping span around ", element,  " at offset ", offset);
+            range.setStart(element, offset - 1);
+            range.setEnd(element, offset);
+            let span = document.createElement('span');
+            span.classList.add(className);
+            span.style.display = 'inline-block';
+            range.surroundContents(span);
+            console.log("highlightID: wrapped span around ", element, " at offset ", offset);
+          } else {
+            element.classList.add(className);
+            console.log("highlightID: added class to ", element);
+          }
+        }
+      }
+    </script>
+
+    <link rel="stylesheet" href="/MathCATDemo/input/index-51cd4d2ec720dc56.css" integrity="sha384-rKabVW8zZRKxEtbSDjcQ06HpVAJIa+nnneWoW1sBOKBXRLTkamaz+f1kyD93gZgW"/>  
+    <!-- for debugging -->
+    
+<script type="module">
+import init, * as bindings from '/MathCATDemo/input/math_cat_demo-fb02851a1bed2cf3.js';
+const wasm = await init({ module_or_path: '/MathCATDemo/input/math_cat_demo-fb02851a1bed2cf3_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>  
+<link rel="modulepreload" href="/MathCATDemo/input/math_cat_demo-fb02851a1bed2cf3.js" crossorigin="anonymous" integrity="sha384-7O8+Kw6LnqgdN8I6dCrpUB6mf7zHK2z3nf48BbQZR4pnnwLzzjAIktkm+bOxZAM3"><link rel="preload" href="/MathCATDemo/input/math_cat_demo-fb02851a1bed2cf3_bg.wasm" crossorigin="anonymous" integrity="sha384-zNOPxhUxA+8n+CTrIftzn6SX8PjPjkPbnFDW1v3CdBVzyvmuI0xFdCSv9d5zkxdh" as="fetch" type="application/wasm"></head>
+</html>
