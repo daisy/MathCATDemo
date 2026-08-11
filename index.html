@@ -149,10 +149,16 @@
     function SetCookie(cookie_value) {
       let answer = document.cookie;
       if (cookie_value) {
+        // Share prefs between /MathCATDemo/ and /MathCATDemo/input/.
+        let path = location.pathname.replace(/\/input\/?$/, '/') || '/';
+        if (!path.endsWith('/')) {
+          path += '/';
+        }
+        const secure = location.protocol === 'https:' ? '; Secure' : '';
         for (const entry of cookie_value.split(";")) {
           const trimmed = entry.trim();
           if (trimmed) {
-            document.cookie = trimmed + "; max-age=31536000; SameSite=Lax";
+            document.cookie = trimmed + "; max-age=31536000; SameSite=Lax; Path=" + path + secure;
           }
         }
       }
@@ -200,6 +206,14 @@
         console.log("TTS:", text);
         speakTextWithProxy(text, lang);
       }
+
+      function StopSpeech() {
+        if (window['MathCAT'].readAloudAudio) {
+          window['MathCAT'].readAloudAudio.pause();
+          removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
+        }
+      }
+      window.StopSpeech = StopSpeech;
 
       function ensureReadAloudAudio() {
         if (window['MathCAT'].readAloudAudio) {

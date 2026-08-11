@@ -34,6 +34,7 @@ enum Msg {
     MathReady {
         math_string: String,
         auto_speak: bool,
+        generation: u64,
     },
     UebBrailleInput(String),
     NavMode(&'static str),
@@ -74,6 +75,7 @@ struct Model {
     braille_node_ref: NodeRef,
     ueb_braille_input: String,
     ueb_braille_error: String,
+    ueb_input_generation: u64,
     tts: String,
 
     update_speech: bool,
@@ -315,6 +317,7 @@ impl Component for Model {
             braille_node_ref: NodeRef::default(),
             ueb_braille_input: String::default(),
             ueb_braille_error: String::default(),
+            ueb_input_generation: 0,
             tts: "SSML".to_string(),
 
             update_speech: true,
@@ -346,6 +349,7 @@ impl Component for Model {
         debug!("======= In update: msg: {:?}", msg);
         self.update_braille = false;    // turn on when appropriate
         self.update_speech = false;     // turn on when appropriate
+        let mut should_render = true;
         match msg {
             Msg::NewMathML => {
                 if let Html::VRef(_) = &self.display {
@@ -375,52 +379,64 @@ impl Component for Model {
                     let link = self.link.clone();
                     spawn_local(async move {
                         let math_string = convert_and_render_math(pending).await;
-                        link.send_message(Msg::MathReady { math_string, auto_speak: true });
+                        link.send_message(Msg::MathReady { math_string, auto_speak: true, generation: 0 });
                     });
                 };
-                return false;
+                should_render = false;
             },
-            Msg::MathReady { math_string, auto_speak } => {
-                self.math_string = math_string;
-                self.nav_id = "".to_string();
-                self.nav_offset = 0;
-                self.update_braille = true;
-                self.update_speech = true;
-                self.auto_speak = auto_speak;
+            Msg::MathReady { math_string, auto_speak, generation } => {
+                if generation != 0 && generation != self.ueb_input_generation {
+                    should_render = false;
+                } else {
+                    self.math_string = math_string;
+                    self.nav_id = "".to_string();
+                    self.nav_offset = 0;
+                    self.update_braille = true;
+                    self.update_speech = true;
+                    self.auto_speak = auto_speak;
+                }
             },
             Msg::UebBrailleInput(text) => {
-                self.ueb_braille_input = text.clone();
-                if text.trim().is_empty() {
-                    self.ueb_braille_error.clear();
-                    return true;
-                }
+                if text == self.ueb_braille_input {
+                    should_render = false;
+                } else {
+                    self.ueb_braille_input = text.clone();
+                    self.ueb_input_generation = self.ueb_input_generation.wrapping_add(1);
+                    stop_speech();
+                    self.speak = false;
 
-                self.braille_code = "UEB".to_string();
-                if let Err(e) = set_preference("BrailleCode".to_string(), "UEB".to_string()) {
-                    error!("Failed to set BrailleCode to UEB: {}", e);
-                }
-
-                let unicode_braille = ensure_unicode_braille(text.trim());
-                match set_mathml_from_braille(&unicode_braille) {
-                    Ok(mathml) => {
+                    if text.trim().is_empty() {
                         self.ueb_braille_error.clear();
-                        let link = self.link.clone();
-                        spawn_local(async move {
-                            let math_string = convert_and_render_math(
-                                PendingMath::AlreadyMathML(mathml),
-                            )
-                            .await;
-                            link.send_message(Msg::MathReady {
-                                math_string,
-                                auto_speak: false,
-                            });
-                        });
-                        return false;
-                    }
-                    Err(e) => {
-                        let message = errors_to_string(&e);
-                        error!("UEB braille input error: {}", message);
-                        self.ueb_braille_error = message;
+                    } else {
+                        self.braille_code = "UEB".to_string();
+                        if let Err(e) = set_preference("BrailleCode".to_string(), "UEB".to_string()) {
+                            error!("Failed to set BrailleCode to UEB: {}", e);
+                        }
+
+                        let unicode_braille = ensure_unicode_braille(text.trim());
+                        match set_mathml_from_braille(&unicode_braille) {
+                            Ok(mathml) => {
+                                self.ueb_braille_error.clear();
+                                let generation = self.ueb_input_generation;
+                                let link = self.link.clone();
+                                spawn_local(async move {
+                                    let math_string = convert_and_render_math(
+                                        PendingMath::AlreadyMathML(mathml),
+                                    )
+                                    .await;
+                                    link.send_message(Msg::MathReady {
+                                        math_string,
+                                        auto_speak: true,
+                                        generation,
+                                    });
+                                });
+                            }
+                            Err(e) => {
+                                let message = errors_to_string(&e);
+                                error!("UEB braille input error: {}", message);
+                                self.ueb_braille_error = message;
+                            }
+                        }
                     }
                 }
             },
@@ -506,9 +522,11 @@ impl Component for Model {
                 }
             },
         };
-        update_speech_and_braille(self);
+        if should_render {
+            update_speech_and_braille(self);
+        }
         self.save_state();
-        return true;
+        return should_render;
     }
 
     fn change(&mut self, _props: Self::Properties) -> ShouldRender {
@@ -536,7 +554,6 @@ impl Component for Model {
                 <div>
                     <label for="ueb-braille-input">{"UEB Braille Input: "}</label>
                     <input type="text" id="ueb-braille-input" size="80" autocorrect="off"
-                        value={self.ueb_braille_input.clone()}
                         aria-describedby="ueb-braille-error"
                         oninput=self.link.callback(|e: InputData| Msg::UebBrailleInput(e.value)) />
                 </div>
@@ -748,6 +765,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = "SpeakText")]
     pub fn speak_text(text: &str, lang: &str);
+
+    #[wasm_bindgen(js_name = "StopSpeech")]
+    pub fn stop_speech();
 
     #[wasm_bindgen(js_name = "HighlightNavigationElement")]
     pub fn highlight_nav_element(text: &str, offset: usize);

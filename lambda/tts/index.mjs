@@ -6,20 +6,47 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ||
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+function getHeader(event, name) {
+  const headers = event.headers || {};
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === wanted) {
+      return Array.isArray(value) ? (value[0] || '') : (value || '');
+    }
+  }
+  return '';
+}
+
+function isAllowedOrigin(origin) {
+  if (!origin) {
+    return false;
+  }
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    return true;
+  }
+  try {
+    const url = new URL(origin);
+    return (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1') &&
+      (url.protocol === 'http:' || url.protocol === 'https:');
+  } catch {
+    return false;
+  }
+}
+
 function corsHeaders(origin) {
-  return {
-    'Access-Control-Allow-Origin': origin,
+  const headers = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   };
+  if (origin) {
+    headers['Access-Control-Allow-Origin'] = origin;
+  }
+  return headers;
 }
 
 function resolveOrigin(event) {
-  const origin = event.headers?.origin || event.headers?.Origin || '';
-  if (ALLOWED_ORIGINS.includes(origin)) {
-    return origin;
-  }
-  return ALLOWED_ORIGINS[0];
+  const origin = getHeader(event, 'origin');
+  return isAllowedOrigin(origin) ? origin : '';
 }
 
 function jsonResponse(statusCode, origin, body) {

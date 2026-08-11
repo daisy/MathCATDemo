@@ -1,4 +1,6 @@
 [serve]
+# Bind IPv4 only. [::1] is not in the TTS Lambda CORS allowlist.
+addresses = ["127.0.0.1"]
 # The port to serve on.
 port = 8080
 # Open a browser tab once the initial build is complete.
