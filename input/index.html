@@ -149,10 +149,16 @@
     function SetCookie(cookie_value) {
       let answer = document.cookie;
       if (cookie_value) {
+        // Share prefs between /MathCATDemo/ and /MathCATDemo/input/.
+        let path = location.pathname.replace(/\/input\/?$/, '/') || '/';
+        if (!path.endsWith('/')) {
+          path += '/';
+        }
+        const secure = location.protocol === 'https:' ? '; Secure' : '';
         for (const entry of cookie_value.split(";")) {
           const trimmed = entry.trim();
           if (trimmed) {
-            document.cookie = trimmed + "; max-age=31536000; SameSite=Lax";
+            document.cookie = trimmed + "; max-age=31536000; SameSite=Lax; Path=" + path + secure;
           }
         }
       }
@@ -200,6 +206,14 @@
         console.log("TTS:", text);
         speakTextWithProxy(text, lang);
       }
+
+      function StopSpeech() {
+        if (window['MathCAT'].readAloudAudio) {
+          window['MathCAT'].readAloudAudio.pause();
+          removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
+        }
+      }
+      window.StopSpeech = StopSpeech;
 
       function ensureReadAloudAudio() {
         if (window['MathCAT'].readAloudAudio) {
@@ -329,8 +343,8 @@
     <!-- for debugging -->
     
 <script type="module">
-import init, * as bindings from '/MathCATDemo/input/math_cat_demo-fb02851a1bed2cf3.js';
-const wasm = await init({ module_or_path: '/MathCATDemo/input/math_cat_demo-fb02851a1bed2cf3_bg.wasm' });
+import init, * as bindings from '/MathCATDemo/input/math_cat_demo-7cc70666aea6aca5.js';
+const wasm = await init({ module_or_path: '/MathCATDemo/input/math_cat_demo-7cc70666aea6aca5_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -339,5 +353,5 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>  
-<link rel="modulepreload" href="/MathCATDemo/input/math_cat_demo-fb02851a1bed2cf3.js" crossorigin="anonymous" integrity="sha384-7O8+Kw6LnqgdN8I6dCrpUB6mf7zHK2z3nf48BbQZR4pnnwLzzjAIktkm+bOxZAM3"><link rel="preload" href="/MathCATDemo/input/math_cat_demo-fb02851a1bed2cf3_bg.wasm" crossorigin="anonymous" integrity="sha384-zNOPxhUxA+8n+CTrIftzn6SX8PjPjkPbnFDW1v3CdBVzyvmuI0xFdCSv9d5zkxdh" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/MathCATDemo/input/math_cat_demo-7cc70666aea6aca5.js" crossorigin="anonymous" integrity="sha384-AEdiSeDvO73ExSlrcS3ZCS/Zsy96jSk5So9xHZCskh9iK5EZc2Zs5NyhUFbj/8jl"><link rel="preload" href="/MathCATDemo/input/math_cat_demo-7cc70666aea6aca5_bg.wasm" crossorigin="anonymous" integrity="sha384-sNYiUx5/9J2EmeQp1UWYVpbIU/v2UX8Ek1PXA25wXJuvVAHnzBh53+NUrTaSnmA8" as="fetch" type="application/wasm"></head>
 </html>

@@ -46,6 +46,9 @@ function __wbg_get_imports() {
         __wbg_SpeakText_b9634c61bd01ad05: function(arg0, arg1, arg2, arg3) {
             SpeakText(getStringFromWasm0(arg0, arg1), getStringFromWasm0(arg2, arg3));
         },
+        __wbg_StopSpeech_0b7b759802e31872: function() {
+            StopSpeech();
+        },
         __wbg_TypesetMathML_36c32f96fc3a127c: function(arg0, arg1) {
             const ret = TypesetMathML(getStringFromWasm0(arg0, arg1));
             return ret;
@@ -388,7 +391,7 @@ function __wbg_get_imports() {
             console.warn(arg0);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 115, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 114, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_a448fc713795679a___convert__closures_____invoke___wasm_bindgen_a448fc713795679a___JsValue__core_9b3796e30d99ddb7___result__Result_____wasm_bindgen_a448fc713795679a___JsError___true_);
             return ret;
         },
