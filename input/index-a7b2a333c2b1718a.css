@@ -68,21 +68,30 @@ select {
   outline: 0;
   background: rgb(176, 236, 176);
   background-image: none;
-  height: 100%;
   color: black;
   cursor: pointer;
   border: 1px solid black;
   border-radius: 3px;
-  font-size: 90%;
+  font: inherit;
+  line-height: 1.2;
+  margin: 0;
+  padding: 0 0.4em;
+  box-sizing: border-box;
+  vertical-align: baseline;
 }
 
 .select {
-  position: relative;
-  height: 2em;
-  line-height: 3;
+  display: inline-block;
   overflow: hidden;
+  overflow: clip;
   border-radius: 0.25em;
-  padding-bottom: 10px;
+  vertical-align: baseline;
+  line-height: 1.2;
+}
+
+#speech-table > tbody > tr:first-child > td:nth-child(2),
+#braille-table > tbody > tr:first-child > td:nth-child(2) {
+  white-space: nowrap;
 }
 
 option {
