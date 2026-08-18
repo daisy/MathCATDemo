@@ -272,8 +272,33 @@ fn get_header() -> String {
 }
 
 
+fn selected_from_list(e: ChangeData, items: &[String], fallback: &str) -> String {
+    match e {
+        ChangeData::Select(select) => {
+            let idx = select.selected_index();
+            if idx >= 0 {
+                items.get(idx as usize).cloned().unwrap_or_else(|| fallback.to_string())
+            } else {
+                fallback.to_string()
+            }
+        }
+        _ => fallback.to_string(),
+    }
+}
+
+fn apply_braille_code(component: &Model) {
+    // MathCAT defaults to Nemeth. Keep it aligned with the dropdown even when there is no math yet.
+    if component.braille_code.is_empty() {
+        return;
+    }
+    if let Err(e) = set_preference("BrailleCode".to_string(), component.braille_code.clone()) {
+        error!("Failed to set BrailleCode: {}", e);
+    }
+}
+
 fn update_speech_and_braille(component: &mut Model) {
     if component.math_string.is_empty() {
+        apply_braille_code(component);
         return;
     }
 
@@ -297,13 +322,16 @@ fn update_speech_and_braille(component: &mut Model) {
         component.update_speech = false;  
     }
 
+    // After speech prefs: MathCAT's default is Nemeth, and Language/SpeechStyle reloads
+    // must not leave that default in place while the dropdown shows UEB.
+    apply_braille_code(component);
+
     if component.speak && component.tts != "Off" {
         speak_text(&component.speech, &component.language);
         component.speak = false;
     }
 
     if component.update_braille {
-        set_preference("BrailleCode".to_string(), component.braille_code.clone()).unwrap();
         set_preference("BrailleNavHighlight".to_string(), component.braille_dots78.clone()).unwrap();
         let mut braille = match get_braille(component.nav_id.clone()) {
             Ok(str) => str,
@@ -498,6 +526,7 @@ impl Component for Model {
             },
             Msg::Language(text) => {
                 self.language = text;
+                Self::apply_pref("Language", self.language.clone());
                 self.update_speech = true;
             },
             Msg::SpeechStyle(text) => {
@@ -514,6 +543,7 @@ impl Component for Model {
             },
             Msg::BrailleCode(text) => {
                 self.braille_code = text;
+                Self::apply_pref("BrailleCode", self.braille_code.clone());
                 self.update_braille = true;
             },
             Msg::BrailleDisplayAs(text) => {
@@ -586,6 +616,16 @@ impl Component for Model {
     }
 
     fn view(&self) -> Html {
+        let languages = self.supported_languages.clone();
+        let language = self.language.clone();
+        let on_language = self.link.callback(move |e: ChangeData| {
+            Msg::Language(selected_from_list(e, &languages, &language))
+        });
+        let braille_codes = self.supported_braille_codes.clone();
+        let braille_code = self.braille_code.clone();
+        let on_braille_code = self.link.callback(move |e: ChangeData| {
+            Msg::BrailleCode(selected_from_list(e, &braille_codes, &braille_code))
+        });
         html! {
             <div>
                 <h1>{get_header()}</h1>
@@ -659,10 +699,7 @@ impl Component for Model {
                         <td><h2 id="speech-heading"><label id="speech-label" for="speech">{"Speech"}</label></h2></td>
                         <td colspan="3"><label id="language-label" for="language">{"Language: "}</label>
                             <span class="select"><select name="language" id="language" aria-labelledby="language-label"
-                                onchange=self.link.callback(|e: ChangeData| match e {
-                                    ChangeData::Select(select) => Msg::Language(select.value()),
-                                    _ => Msg::Language("en".to_string()),
-                                })>
+                                onchange=on_language>
                             { for self.supported_languages.iter().map(|lang| {
                                 html! {
                                     <option key={lang.clone()} value={lang.clone()} selected={self.language == *lang}>{lang}</option>
@@ -723,10 +760,7 @@ impl Component for Model {
                         <td><h2 id="braille-heading">{"Braille"}</h2></td>
                         <td colspan="3"><label id="braille-code-label" for="braille_code">{"Braille Code: "}</label>
                             <span class="select"><select name="braille_code" id="braille_code" aria-labelledby="braille-code-label"
-                                onchange=self.link.callback(|e: ChangeData| match e {
-                                    ChangeData::Select(select) => Msg::BrailleCode(select.value()),
-                                    _ => Msg::BrailleCode("Nemeth".to_string()),
-                                })>
+                                onchange=on_braille_code>
                             { for self.supported_braille_codes.iter().map(|code| {
                                 html! {
                                     <option key={code.clone()} value={code.clone()} selected={self.braille_code == *code}>{code}</option>
