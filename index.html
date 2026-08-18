@@ -149,11 +149,10 @@
     function SetCookie(cookie_value) {
       let answer = document.cookie;
       if (cookie_value) {
-        // Share prefs between /MathCATDemo/ and /MathCATDemo/input/.
-        let path = location.pathname.replace(/\/input\/?$/, '/') || '/';
-        if (!path.endsWith('/')) {
-          path += '/';
-        }
+        // Share prefs across /MathCATDemo, /MathCATDemo/, and /MathCATDemo/input/.
+        // No trailing slash: Chrome rejects Path=/foo/ when the page is /foo.
+        const pathMatch = location.pathname.match(/^(\/[^/]+)/);
+        const path = pathMatch ? pathMatch[1] : '/';
         const secure = location.protocol === 'https:' ? '; Secure' : '';
         for (const entry of cookie_value.split(";")) {
           const trimmed = entry.trim();
@@ -164,6 +163,7 @@
       }
       return answer;
     }
+    window.SetCookie = SetCookie;
 
     // For debugging, popup a file selector to reload the file instead of recompiling and waiting
     function GetFile() {
