@@ -149,10 +149,16 @@
     function SetCookie(cookie_value) {
       let answer = document.cookie;
       if (cookie_value) {
+        // Share prefs between /MathCATDemo/ and /MathCATDemo/input/.
+        let path = location.pathname.replace(/\/input\/?$/, '/') || '/';
+        if (!path.endsWith('/')) {
+          path += '/';
+        }
+        const secure = location.protocol === 'https:' ? '; Secure' : '';
         for (const entry of cookie_value.split(";")) {
           const trimmed = entry.trim();
           if (trimmed) {
-            document.cookie = trimmed + "; max-age=31536000; SameSite=Lax";
+            document.cookie = trimmed + "; max-age=31536000; SameSite=Lax; Path=" + path + secure;
           }
         }
       }
@@ -200,6 +206,14 @@
         console.log("TTS:", text);
         speakTextWithProxy(text, lang);
       }
+
+      function StopSpeech() {
+        if (window['MathCAT'].readAloudAudio) {
+          window['MathCAT'].readAloudAudio.pause();
+          removeHighlight(window['MathCAT'].readAloudCurrentMark, 0, 'sync-highlight');
+        }
+      }
+      window.StopSpeech = StopSpeech;
 
       function ensureReadAloudAudio() {
         if (window['MathCAT'].readAloudAudio) {
@@ -325,12 +339,12 @@
       }
     </script>
 
-    <link rel="stylesheet" href="/MathCATDemo/index-51cd4d2ec720dc56.css" integrity="sha384-rKabVW8zZRKxEtbSDjcQ06HpVAJIa+nnneWoW1sBOKBXRLTkamaz+f1kyD93gZgW"/>  
+    <link rel="stylesheet" href="/MathCATDemo/index-a7b2a333c2b1718a.css" integrity="sha384-N7ujExJMD7lpUksGIpMId09gioYW5YpeYP8HSrUsO/hPb/N5KV31cziJBevYhmZz"/>  
     <!-- for debugging -->
     
 <script type="module">
-import init, * as bindings from '/MathCATDemo/math_cat_demo-5fe5cfe1344930b7.js';
-const wasm = await init({ module_or_path: '/MathCATDemo/math_cat_demo-5fe5cfe1344930b7_bg.wasm' });
+import init, * as bindings from '/MathCATDemo/math_cat_demo-4f6a844f695dc1bc.js';
+const wasm = await init({ module_or_path: '/MathCATDemo/math_cat_demo-4f6a844f695dc1bc_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -339,5 +353,5 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>  
-<link rel="modulepreload" href="/MathCATDemo/math_cat_demo-5fe5cfe1344930b7.js" crossorigin="anonymous" integrity="sha384-FaLIxbPsqYgKpP6oWzJH602a3QyJ4/lX2k8ghg0/8PrFUqL3qZYE7x0aGuOlo4tc"><link rel="preload" href="/MathCATDemo/math_cat_demo-5fe5cfe1344930b7_bg.wasm" crossorigin="anonymous" integrity="sha384-LV/VfTKjPsnh8JY4wiFRCQlIN5pnipak4TGh/k1XTogKPbI/wKOmPL9nId09oitw" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/MathCATDemo/math_cat_demo-4f6a844f695dc1bc.js" crossorigin="anonymous" integrity="sha384-wZmbf6LlzpbUnNZgJlYHE4Eg27AcK8hTUqrXvzzxb37BzcysCSgF10QXI6NYY9yn"><link rel="preload" href="/MathCATDemo/math_cat_demo-4f6a844f695dc1bc_bg.wasm" crossorigin="anonymous" integrity="sha384-AXO+lD5nfrkAL0X119CQrm3uUpfjFSpKVYB9OFGVFm4KBBWgMG6O0OKjfRjXSG8u" as="fetch" type="application/wasm"></head>
 </html>

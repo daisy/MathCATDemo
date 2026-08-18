@@ -1,8 +1,7 @@
 
 use yew::prelude::*;
-use yew::web_sys::Element;
-// use wasm_bindgen::JsCast;
-// use web_sys::{HtmlInputElement};
+use yew::web_sys::{Element, HtmlSelectElement};
+use wasm_bindgen::JsCast;
 use regex::Regex;
 #[macro_use]
 extern crate lazy_static;
@@ -39,7 +38,7 @@ enum Msg {
     UebBrailleInput(String),
     NavMode(&'static str),
     NavVerbosity(&'static str),
-    Language(&'static str),
+    Language(String),
     SpeechStyle(&'static str),
     SpeechVerbosity(&'static str),
     SayCaps(&'static str),
@@ -59,6 +58,7 @@ struct Model {
     nav_verbosity: String,
     display: Html,
     language: String,
+    supported_languages: Vec<String>,
     speech_style: String,
     verbosity: String,
     say_caps: bool,
@@ -98,13 +98,56 @@ impl Model {
         set_cookie(&cookie);
     }
 
+    fn apply_pref(key: &str, value: String) {
+        if let Err(e) = set_preference(key.to_string(), value) {
+            error!("Failed to set {} from cookies: {}", key, e);
+        }
+    }
+
     fn apply_loaded_preferences(&self) {
-        if let Err(e) = set_preference("NavMode".to_string(), self.nav_mode.clone()) {
-            error!("Failed to set NavMode from cookies: {}", e);
+        // Nav prefs are needed before the first keypress; the rest must match the UI
+        // even if the user generates speech/braille without touching a control.
+        Self::apply_pref("NavMode", self.nav_mode.clone());
+        Self::apply_pref("NavVerbosity", self.nav_verbosity.clone());
+        Self::apply_pref("Language", self.language.clone());
+        Self::apply_pref("SpeechStyle", self.speech_style.clone());
+        Self::apply_pref("Verbosity", self.verbosity.clone());
+        Self::apply_pref(
+            "SpeechOverrides_CapitalLetters",
+            (if self.say_caps { "cap" } else { "" }).to_string(),
+        );
+        let tts = if self.tts == "Off" { "None".to_string() } else { self.tts.clone() };
+        Self::apply_pref("TTS", tts);
+        Self::apply_pref("Bookmark", "true".to_string());
+        Self::apply_pref("BrailleCode", self.braille_code.clone());
+        Self::apply_pref("BrailleNavHighlight", self.braille_dots78.clone());
+    }
+
+    /// Yew 0.18 sets the `selected` *attribute* on `<option>`, which does not update
+    /// the live `<select>` value (same issue as `checked` vs `defaultChecked`).
+    fn sync_selects(&self) {
+        fn set_selected(id: &str, index: Option<usize>) {
+            let Some(index) = index else { return };
+            let Some(el) = yew::utils::document().get_element_by_id(id) else { return };
+            let Ok(select) = el.dyn_into::<HtmlSelectElement>() else { return };
+            let index = index as i32;
+            if select.selected_index() != index {
+                select.set_selected_index(index);
+            }
         }
-        if let Err(e) = set_preference("NavVerbosity".to_string(), self.nav_verbosity.clone()) {
-            error!("Failed to set NavVerbosity from cookies: {}", e);
-        }
+
+        set_selected(
+            "language",
+            self.supported_languages
+                .iter()
+                .position(|lang| lang == &self.language),
+        );
+        set_selected(
+            "braille_code",
+            self.supported_braille_codes
+                .iter()
+                .position(|code| code == &self.braille_code),
+        );
     }
 
     fn init_state_from_cookies(&mut self) {
@@ -302,6 +345,7 @@ impl Component for Model {
             nav_verbosity: "Verbose".to_string(),
             display: Html::VRef(display_node.into()),
             language: "en".to_string(),
+            supported_languages: Vec::new(),
             speech_style: "ClearSpeak".to_string(),
             speak: true,
             verbosity: "Verbose".to_string(),
@@ -330,6 +374,10 @@ impl Component for Model {
             error!("Didn't find rules dir: {}", e.to_string());
         };
         set_preference("CheckRuleFiles".to_string(), "None".to_string()).unwrap();
+        match get_supported_languages() {
+            Ok(langs) => initial_state.supported_languages = langs,
+            Err(e) => error!("Failed to get supported languages: {}", e),
+        }
         match get_supported_braille_codes() {
             Ok(codes) => initial_state.supported_braille_codes = codes,
             Err(e) => error!("Failed to get supported braille codes: {}", e),
@@ -449,7 +497,7 @@ impl Component for Model {
                 set_preference("NavVerbosity".to_string(), text.to_string()).unwrap();
             },
             Msg::Language(text) => {
-                self.language = text.to_string();
+                self.language = text;
                 self.update_speech = true;
             },
             Msg::SpeechStyle(text) => {
@@ -541,8 +589,10 @@ impl Component for Model {
         html! {
             <div>
                 <h1>{get_header()}</h1>
-                <h2>{"Math Input Area"}</h2>
-                <textarea id="mathml-input"  rows="5" cols="80" autocorrect="off"
+                <h2 id="math-input-heading">
+                    <label id="math-input-label" for="mathml-input">{"Math Input Area"}</label>
+                </h2>
+                <textarea id="mathml-input" aria-labelledby="math-input-label" rows="5" cols="80" autocorrect="off"
                     placeholder={INPUT_MESSAGE}>
                     {INPUT_MESSAGE.to_string() + START_FORMULA}
                 </textarea>
@@ -554,6 +604,7 @@ impl Component for Model {
                 <div>
                     <label for="ueb-braille-input">{"UEB Braille Input: "}</label>
                     <input type="text" id="ueb-braille-input" size="80" autocorrect="off"
+                        autocomplete="off"
                         aria-describedby="ueb-braille-error"
                         oninput=self.link.callback(|e: InputData| Msg::UebBrailleInput(e.value)) />
                 </div>
@@ -562,7 +613,7 @@ impl Component for Model {
                     <input type="text" id="ueb-braille-error" size="80" readonly=true
                         value={self.ueb_braille_error.clone()} />
                 </div>
-                <h2>
+                <h2 id="math-display-heading">
                     {"Displayed Math (click to navigate, ESC to exit ["}
                     <a href="https://daisy.github.io/MathCAT/nav-commands.html" target="_blank" rel="noreferrer">{"nav help"}</a>
                     {"])"}
@@ -596,36 +647,27 @@ impl Component for Model {
                                 onclick=self.link.callback(|_| Msg::NavVerbosity("Verbose"))/>
                             <label for="NavVerbose">{"Verbose"}</label></td>
                     </tr></table>
-                <div role="application" id="mathml-output" tabindex="0" aria-roledescription="navigable displayed math"
+                <div role="application" id="mathml-output" tabindex="0"
+                        aria-labelledby="math-display-heading"
+                        aria-roledescription="navigable displayed math"
                         onkeydown=self.link.callback(|ev| Msg::Navigate(ev))>
                     {self.display.clone()}
                 </div>
                 
                 <table id="speech-table" role="presentation">
                     <tr>     // 1x2 outside table
-                        <td><h2 id="speech-heading">{"Speech"}</h2></td>
-                        <td colspan="3"><label for="Language">{"Language: "}</label>
-                            <span class="select"><select name="language" id="language"
+                        <td><h2 id="speech-heading"><label id="speech-label" for="speech">{"Speech"}</label></h2></td>
+                        <td colspan="3"><label id="language-label" for="language">{"Language: "}</label>
+                            <span class="select"><select name="language" id="language" aria-labelledby="language-label"
                                 onchange=self.link.callback(|e: ChangeData| match e {
-                                    ChangeData::Select(select) => match select.value().as_str() {
-                                        "es" => Msg::Language("es"),
-                                        "fi" => Msg::Language("fi"),
-                                        "sv" => Msg::Language("sv"),
-                                        "id" => Msg::Language("id"),
-                                        "vi" => Msg::Language("vi"),
-                                        "zh-tw" => Msg::Language("zh-tw"),
-                                        _ => Msg::Language("en"),
-                                    },
-                                    _ => Msg::Language("en"),
+                                    ChangeData::Select(select) => Msg::Language(select.value()),
+                                    _ => Msg::Language("en".to_string()),
                                 })>
-                            // FIX: this should search available languages
-                                <option value="en" selected={self.language == "en"}>{"English"}</option>
-                                <option value="es" selected={self.language == "es"}>{"Spanish"}</option>
-                                <option value="fi" selected={self.language == "fi"}>{"Finnish"}</option>
-                                <option value="sv" selected={self.language == "sv"}>{"Swedish"}</option>
-                                <option value="id" selected={self.language == "id"}>{"Indonesian"}</option>
-                                <option value="vi" selected={self.language == "vi"}>{"Vietnamese"}</option>
-                                <option value="zh-tw" selected={self.language == "zh-tw"}>{"Chinese (TW)"}</option>
+                            { for self.supported_languages.iter().map(|lang| {
+                                html! {
+                                    <option key={lang.clone()} value={lang.clone()} selected={self.language == *lang}>{lang}</option>
+                                }
+                            }) }
                             </select></span>
                         </td>
                     </tr><tr>
@@ -673,21 +715,21 @@ impl Component for Model {
                         </td>
                     </tr>
                 </table>
-                <textarea role="application" id="speech" aria-labelledby="speech-heading" readonly=true rows="3" cols="80" data-hint="" autocorrect="off">
+                <textarea id="speech" aria-labelledby="speech-label" readonly=true rows="3" cols="80" autocorrect="off">
                     {&self.speech}
                 </textarea>
                 <table id="braille-table" role="presentation">
                     <tr>
                         <td><h2 id="braille-heading">{"Braille"}</h2></td>
-                        <td colspan="3"><label for="braille_code">{"Braille Code: "}</label>
-                            <span class="select"><select name="braille_code" id="braille_code"
+                        <td colspan="3"><label id="braille-code-label" for="braille_code">{"Braille Code: "}</label>
+                            <span class="select"><select name="braille_code" id="braille_code" aria-labelledby="braille-code-label"
                                 onchange=self.link.callback(|e: ChangeData| match e {
                                     ChangeData::Select(select) => Msg::BrailleCode(select.value()),
                                     _ => Msg::BrailleCode("Nemeth".to_string()),
                                 })>
                             { for self.supported_braille_codes.iter().map(|code| {
                                 html! {
-                                    <option value={code.clone()} selected={self.braille_code == *code}>{code}</option>
+                                    <option key={code.clone()} value={code.clone()} selected={self.braille_code == *code}>{code}</option>
                                 }
                             }) }
                             </select></span>
@@ -723,7 +765,7 @@ impl Component for Model {
                             <label for="DotsAll">{"All"}</label></td>
                     </tr>
                 </table>
-                <div role="region" aria-labelledby="braille-heading" id="braille" readonly=true rows="2" cols="80" data-hint="" autocorrect="off"
+                <div role="textbox" aria-readonly="true" tabindex="0" aria-labelledby="braille-heading" id="braille"
                     ref={self.braille_node_ref.clone()}>
                 </div>
                 <p>
@@ -740,6 +782,7 @@ impl Component for Model {
         if !self.nav_id.is_empty() {
             highlight_nav_element(&self.nav_id, self.nav_offset);
         }
+        self.sync_selects();
     }
 }
 
