@@ -345,12 +345,19 @@ fn update_speech_and_braille(component: &mut Model) {
     
             let mut result = String::with_capacity(braille.len());
             for ch in braille.chars() {
-                let i = (ch as usize - 0x2800) &0x3F;     // eliminate dots 7 and 8 if present 
-                let mut ascii_str = UNICODE_TO_ASCII[i].to_string();
+                let i = (ch as usize - 0x2800) &0x3F;     // eliminate dots 7 and 8 if present
+                // ASCII Braille uses < > &; this string is assigned via innerHTML.
+                let ascii = match UNICODE_TO_ASCII[i] {
+                    '&' => "&amp;".to_string(),
+                    '<' => "&lt;".to_string(),
+                    '>' => "&gt;".to_string(),
+                    c => c.to_string(),
+                };
                 if ch as usize > 0x283F {
-                    ascii_str = format!("<span style='font-weight:bold'>{}</span>", &ascii_str);
+                    result.push_str(&format!("<span style='font-weight:bold'>{}</span>", ascii));
+                } else {
+                    result.push_str(&ascii);
                 }
-                result.push_str(&ascii_str);
             }
             braille = result;
         }
