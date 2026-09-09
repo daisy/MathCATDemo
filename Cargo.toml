@@ -22,10 +22,8 @@ phf = { version = "0.13", features = ["macros"] }
 # mathcat = { version = "0.6.3", features = ["include-zip"]}
 
 [dependencies.mathcat]
-version = "0.7.6-beta.9"
 features = ["include-zip"]
-# for testing MathCAT without having to publish a new version 
-# path = "../MathCAT/"
+path = "../MathCAT/"
 
 
 
