@@ -4,7 +4,12 @@ on:
   workflow_dispatch:
   push:
     branches: [main, ueb-parser]
-  # Fired by daisy/MathCAT after a successful braille-parser build (see MathCAT rust.yml).
+
+  # Rebuild the main demo daily if the current MathCAT main has passed CI.
+  schedule:
+    - cron: '17 4 * * *' # run in early morning
+
+  # Fired by daisy/MathCAT after a successful braille-parser build.
   repository_dispatch:
     types: [braille-parser-updated]
 
@@ -22,6 +27,8 @@ jobs:
     env:
       # ueb-parser pushes and MathCAT braille-parser updates both publish under /input/.
       IS_INPUT_DEMO: ${{ github.ref_name == 'ueb-parser' || github.event_name == 'repository_dispatch' }}
+      SHOULD_DEPLOY: 'true'
+
     steps:
       - name: Checkout demo
         uses: actions/checkout@v4
@@ -39,19 +46,39 @@ jobs:
           ref: ${{ (github.ref_name == 'ueb-parser' || github.event_name == 'repository_dispatch') && 'braille-parser' || 'main' }}
           path: MathCAT
 
+      - name: Check that MathCAT main passed CI
+        if: github.event_name == 'schedule'
+        working-directory: MathCAT
+        run: |
+          # MathCAT's CI moves the "latest" tag to a main commit only after CI succeeds.
+          git fetch --force origin refs/tags/latest:refs/tags/latest
+
+          MAIN_SHA="$(git rev-parse HEAD)"
+          LATEST_SHA="$(git rev-list -n 1 refs/tags/latest)"
+
+          if [ "$MAIN_SHA" != "$LATEST_SHA" ]; then
+            echo "Current MathCAT main has not passed CI; skipping deployment."
+            echo "SHOULD_DEPLOY=false" >> "$GITHUB_ENV"
+          fi
+
       - name: Install Rust toolchain
+        if: env.SHOULD_DEPLOY == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Restore Rust cache
+        if: env.SHOULD_DEPLOY == 'true'
+        uses: Swatinem/rust-cache@v2
         with:
           workspaces: MathCATDemo
 
       - name: Install Trunk
+        if: env.SHOULD_DEPLOY == 'true'
         run: cargo install trunk --locked
 
       - name: Build site
+        if: env.SHOULD_DEPLOY == 'true'
         working-directory: MathCATDemo
         run: |
           if [ "$IS_INPUT_DEMO" = "true" ]; then
@@ -61,7 +88,7 @@ jobs:
           fi
 
       - name: Deploy to gh-pages (input/)
-        if: env.IS_INPUT_DEMO == 'true'
+        if: env.SHOULD_DEPLOY == 'true' && env.IS_INPUT_DEMO == 'true'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -69,7 +96,7 @@ jobs:
           destination_dir: input
 
       - name: Deploy to gh-pages (site root)
-        if: env.IS_INPUT_DEMO != 'true'
+        if: env.SHOULD_DEPLOY == 'true' && env.IS_INPUT_DEMO != 'true'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
