@@ -329,8 +329,8 @@
     <!-- for debugging -->
     
 <script type="module">
-import init, * as bindings from '/MathCATDemo/math_cat_demo-e207ec9dfd5cc2e5.js';
-const wasm = await init({ module_or_path: '/MathCATDemo/math_cat_demo-e207ec9dfd5cc2e5_bg.wasm' });
+import init, * as bindings from '/MathCATDemo/math_cat_demo-dbbb70acf3fc9f10.js';
+const wasm = await init({ module_or_path: '/MathCATDemo/math_cat_demo-dbbb70acf3fc9f10_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -339,5 +339,5 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>  
-<link rel="modulepreload" href="/MathCATDemo/math_cat_demo-e207ec9dfd5cc2e5.js" crossorigin="anonymous" integrity="sha384-+qRl+59Esf95X/XsJF4ZeI97hnBPt3EB5zzKHpT7tUlqQQYjlwwyf6x5wt/ffZWP"><link rel="preload" href="/MathCATDemo/math_cat_demo-e207ec9dfd5cc2e5_bg.wasm" crossorigin="anonymous" integrity="sha384-a3UDnnt5esAn7Y79OFqsPHZjlzQCp5X3PANE2Z2Mz42s50PqZ3oPKfBVm064if0p" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/MathCATDemo/math_cat_demo-dbbb70acf3fc9f10.js" crossorigin="anonymous" integrity="sha384-2Xad5RUF9EInvyOetqojw3FR1AaGkb91EdDTqhJ2tqBRxPD2Lm+vqrG2SEpMjplq"><link rel="preload" href="/MathCATDemo/math_cat_demo-dbbb70acf3fc9f10_bg.wasm" crossorigin="anonymous" integrity="sha384-OR5dOOSDQ6mgwuwMmvoxmwAd/TySttfe3Nol5nKLQ/Sy16VhZCxR12dfddRZ/pKM" as="fetch" type="application/wasm"></head>
 </html>
