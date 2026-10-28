@@ -1,50 +1,100 @@
 name: Deploy GitHub Pages
 
+# main → https://daisy.github.io/MathCATDemo/
+#   built against the latest successful daisy/MathCAT Rust run on main
+# braille-parser → https://daisy.github.io/MathCATDemo/input/
+#   built against the latest successful daisy/MathCAT Rust run on braille-parser
+#
+# Rebuild without a new commit: Actions → Deploy GitHub Pages → Run workflow,
+# and choose main or braille-parser. The button is available once this file
+# is on the default branch.
+
 on:
   workflow_dispatch:
-    inputs:
-      deploy_target:
-        description: Where to publish the build
-        required: true
-        type: choice
-        options:
-          - input
-          - root
-        default: input
   push:
-    branches: [main, ueb-parser]
-  # Fired by daisy/MathCAT after a successful braille-parser build (see MathCAT rust.yml).
-  repository_dispatch:
-    types: [braille-parser-updated]
+    branches: [main, braille-parser]
 
 permissions:
   contents: write
 
 concurrency:
-  # Serialize deploys so main (site root) and input/ deploys don't race on gh-pages.
+  # Both deploys publish to gh-pages; do not let them race.
   group: github-pages
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      # input/: ueb-parser pushes, MathCAT braille-parser dispatch, or manual "input" run.
-      IS_INPUT_DEMO: ${{ github.ref_name == 'ueb-parser' || github.event_name == 'repository_dispatch' || (github.event_name == 'workflow_dispatch' && inputs.deploy_target == 'input') }}
     steps:
+      - name: Choose publish target
+        id: target
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$REF_NAME" in
+            main)
+              echo "mathcat_branch=main" >> "$GITHUB_OUTPUT"
+              echo "public_url=/MathCATDemo/" >> "$GITHUB_OUTPUT"
+              echo "destination=root" >> "$GITHUB_OUTPUT"
+              ;;
+            braille-parser)
+              echo "mathcat_branch=braille-parser" >> "$GITHUB_OUTPUT"
+              echo "public_url=/MathCATDemo/input/" >> "$GITHUB_OUTPUT"
+              echo "destination=input" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Run this workflow from main or braille-parser (got: $REF_NAME)." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Find latest successful MathCAT build
+        id: mathcat
+        env:
+          BRANCH: ${{ steps.target.outputs.mathcat_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          QUERY="repos/daisy/MathCAT/actions/workflows/rust.yml/runs?branch=${BRANCH}&event=push&status=success&per_page=1"
+          # The demo token often cannot read another repo's Actions API.
+          # MathCAT is public, so retry without credentials.
+          if ! BODY=$(gh api "$QUERY" 2>/tmp/mathcat-api-err); then
+            echo "Authenticated lookup of daisy/MathCAT workflow runs failed; retrying as a public request."
+            BODY=$(curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -H "User-Agent: MathCATDemo" \
+              "https://api.github.com/${QUERY}")
+          fi
+          SHA=$(jq -r '.workflow_runs[0].head_sha // empty' <<<"$BODY")
+          URL=$(jq -r '.workflow_runs[0].html_url // empty' <<<"$BODY")
+          if [ -z "$SHA" ]; then
+            echo "No successful Rust workflow run on daisy/MathCAT branch ${BRANCH}." >&2
+            jq -c '{message,total_count}' <<<"$BODY" >&2 || true
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "MathCAT ${BRANCH} @ ${SHA}"
+          echo "${URL}"
+          {
+            echo "### MathCAT"
+            echo ""
+            echo "- Branch: \`${BRANCH}\`"
+            echo "- Commit: [\`${SHA}\`](https://github.com/daisy/MathCAT/commit/${SHA})"
+            echo "- Workflow: ${URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Checkout demo
         uses: actions/checkout@v5
         with:
-          # For input deploys, use ueb-parser sources even if the workflow file came from main.
-          ref: ${{ env.IS_INPUT_DEMO == 'true' && 'ueb-parser' || github.ref }}
           path: MathCATDemo
 
       - name: Checkout MathCAT
         uses: actions/checkout@v5
         with:
           repository: daisy/MathCAT
-          # Input demo builds against braille-parser; main site uses MathCAT main.
-          ref: ${{ env.IS_INPUT_DEMO == 'true' && 'braille-parser' || 'main' }}
+          ref: ${{ steps.mathcat.outputs.sha }}
           path: MathCAT
 
       - name: Install Rust toolchain
@@ -54,33 +104,41 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: MathCATDemo
+          workspaces: |
+            MathCATDemo
+            MathCAT
 
       - name: Install Trunk
         run: cargo install trunk --locked
 
       - name: Build site
         working-directory: MathCATDemo
+        env:
+          PUBLIC_URL: ${{ steps.target.outputs.public_url }}
+          DESTINATION: ${{ steps.target.outputs.destination }}
         run: |
-          if [ "$IS_INPUT_DEMO" = "true" ]; then
-            trunk build --public-url /MathCATDemo/input/
+          set -euo pipefail
+          # braille-input is off by default so the main site stays MathML-only.
+          if [ "$DESTINATION" = "input" ]; then
+            trunk build --public-url "$PUBLIC_URL" --features braille-input
           else
-            trunk build --public-url /MathCATDemo/
+            trunk build --public-url "$PUBLIC_URL"
           fi
 
       - name: Deploy to gh-pages (input/)
-        if: env.IS_INPUT_DEMO == 'true'
+        if: steps.target.outputs.destination == 'input'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: MathCATDemo/dist
           destination_dir: input
+          keep_files: true
 
       - name: Deploy to gh-pages (site root)
-        if: env.IS_INPUT_DEMO != 'true'
+        if: steps.target.outputs.destination == 'root'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: MathCATDemo/dist
-          # Preserve /input from the input-demo deploy.
+          # Preserve /input from the braille-parser deploy.
           keep_files: true

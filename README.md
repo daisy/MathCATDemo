@@ -63,7 +63,7 @@ trunk serve
 
 Open the app, choose **SSML** under TTS, generate speech, and confirm audio plays with navigation highlighting.
 
-For GitHub Pages, push frontend changes to `main`. The workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) runs `trunk build` and publishes `dist/` to the `gh-pages` branch automatically. Set `MATHCAT_TTS_API` in `index.html` on `main` before pushing so the built site includes the proxy URL.
+For GitHub Pages, push frontend changes to `main` (site root) or `braille-parser` (`/input/`). The workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) runs `trunk build` against the latest successful MathCAT build on the matching branch and publishes `dist/` to `gh-pages`. Set `MATHCAT_TTS_API` in `index.html` before pushing so the built site includes the proxy URL. You can also rebuild from the Actions tab without a new commit (see [Website builds](#website-builds)).
 
 ### Switching engines later
 
@@ -71,9 +71,11 @@ Redeploy the Lambda with a different `TtsProvider` / `TTS_PROVIDER` and update c
 
 ## Website builds
 
-The live demo is at [daisy.github.io/MathCATDemo](https://daisy.github.io/MathCATDemo/). GitHub Pages serves the **`gh-pages`** branch (contents of `dist/`).
+The live demo is at [daisy.github.io/MathCATDemo](https://daisy.github.io/MathCATDemo/). GitHub Pages serves the **`gh-pages`** branch (contents of `dist/`). The braille-parser demo is at [daisy.github.io/MathCATDemo/input](https://daisy.github.io/MathCATDemo/input/).
 
-**Automatic deploy:** Pushing frontend changes to `main` triggers [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml). It checks out [daisy/MathCAT](https://github.com/daisy/MathCAT) as a sibling crate (matching the local `path = "../MathCAT/"` dependency), runs `trunk build`, and pushes `dist/` to `gh-pages`.
+**Automatic deploy:** Pushing to `main` or `braille-parser` triggers [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml). The workflow checks out [daisy/MathCAT](https://github.com/daisy/MathCAT) at the latest **successful** [Rust](https://github.com/daisy/MathCAT/actions/workflows/rust.yml) run on the matching branch (`main` → MathCAT `main`, site root; `braille-parser` → MathCAT `braille-parser`, `/input/`), runs `trunk build`, and pushes `dist/` to `gh-pages`.
+
+**Manual rebuild:** On GitHub, open **Actions → Deploy GitHub Pages → Run workflow**, then choose `main` or `braille-parser`. That republishes the demo against the latest successful MathCAT build on the matching branch, without a new demo commit. The button appears once this workflow file is on the default branch.
 
 **TTS Lambda deploy:** [`.github/workflows/deploy-tts-lambda.yml`](.github/workflows/deploy-tts-lambda.yml) is separate — it updates only the TTS backend when `lambda/tts/**` changes.
 

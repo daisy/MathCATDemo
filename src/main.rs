@@ -35,6 +35,7 @@ enum Msg {
         auto_speak: bool,
         generation: u64,
     },
+    #[cfg(feature = "braille-input")]
     UebBrailleInput(String),
     NavMode(&'static str),
     NavVerbosity(&'static str),
@@ -73,8 +74,11 @@ struct Model {
     braille_dots78: String,
     braille: String,
     braille_node_ref: NodeRef,
+    #[cfg(feature = "braille-input")]
     ueb_braille_input: String,
+    #[cfg(feature = "braille-input")]
     ueb_braille_error: String,
+    #[cfg(feature = "braille-input")]
     ueb_input_generation: u64,
     tts: String,
 
@@ -195,6 +199,7 @@ enum PendingMath {
 
 static MATH_ERROR: &str = "Unrecognized Math -- use $...$ for TeX, `...` for ASCIIMath, or enter MathML";
 
+#[cfg(feature = "braille-input")]
 fn is_unicode_braille_text(s: &str) -> bool {
     s.chars().all(|c| {
         let u = c as u32;
@@ -203,6 +208,7 @@ fn is_unicode_braille_text(s: &str) -> bool {
 }
 
 /// Map North American ASCII braille to Unicode braille cells (U+2800..).
+#[cfg(feature = "braille-input")]
 fn ascii_braille_to_unicode(ascii: &str) -> String {
     lazy_static! {
         static ref ASCII_TO_UNICODE: std::collections::HashMap<char, char> = {
@@ -222,6 +228,7 @@ fn ascii_braille_to_unicode(ascii: &str) -> String {
         .collect()
 }
 
+#[cfg(feature = "braille-input")]
 fn ensure_unicode_braille(input: &str) -> String {
     if is_unicode_braille_text(input) {
         input.to_string()
@@ -394,8 +401,11 @@ impl Component for Model {
             braille_display_as: "Dots".to_string(),
             braille: String::default(),
             braille_node_ref: NodeRef::default(),
+            #[cfg(feature = "braille-input")]
             ueb_braille_input: String::default(),
+            #[cfg(feature = "braille-input")]
             ueb_braille_error: String::default(),
+            #[cfg(feature = "braille-input")]
             ueb_input_generation: 0,
             tts: "SSML".to_string(),
 
@@ -468,8 +478,16 @@ impl Component for Model {
                 should_render = false;
             },
             Msg::MathReady { math_string, auto_speak, generation } => {
+                #[cfg(feature = "braille-input")]
                 if generation != 0 && generation != self.ueb_input_generation {
                     should_render = false;
+                }
+                #[cfg(not(feature = "braille-input"))]
+                {
+                    let _ = generation;
+                }
+                if !should_render {
+                    // no-op, preserve the stale render suppression only when the feature is enabled
                 } else {
                     self.math_string = math_string;
                     self.nav_id = "".to_string();
@@ -479,6 +497,7 @@ impl Component for Model {
                     self.auto_speak = auto_speak;
                 }
             },
+            #[cfg(feature = "braille-input")]
             Msg::UebBrailleInput(text) => {
                 if text == self.ueb_braille_input {
                     should_render = false;
@@ -633,6 +652,27 @@ impl Component for Model {
         let on_braille_code = self.link.callback(move |e: ChangeData| {
             Msg::BrailleCode(selected_from_list(e, &braille_codes, &braille_code))
         });
+
+        #[cfg(feature = "braille-input")]
+        let ueb_input = html! {
+            <>
+                <div>
+                    <label for="ueb-braille-input">{"UEB Braille Input: "}</label>
+                    <input type="text" id="ueb-braille-input" size="80" autocorrect="off"
+                        autocomplete="off"
+                        aria-describedby="ueb-braille-error"
+                        oninput=self.link.callback(|e: InputData| Msg::UebBrailleInput(e.value)) />
+                </div>
+                <div id="ueb-braille-error-row" aria-live="assertive">
+                    <label for="ueb-braille-error">{"UEB Braille Error: "}</label>
+                    <input type="text" id="ueb-braille-error" size="80" readonly=true
+                        value={self.ueb_braille_error.clone()} />
+                </div>
+            </>
+        };
+        #[cfg(not(feature = "braille-input"))]
+        let ueb_input = Html::default();
+
         html! {
             <div>
                 <h1>{get_header()}</h1>
@@ -648,18 +688,7 @@ impl Component for Model {
                 <input type="button" value="Generate Speech and Braille" id="render-button"
                     onclick=self.link.callback(|_| Msg::NewMathML) />
                 </div>
-                <div>
-                    <label for="ueb-braille-input">{"UEB Braille Input: "}</label>
-                    <input type="text" id="ueb-braille-input" size="80" autocorrect="off"
-                        autocomplete="off"
-                        aria-describedby="ueb-braille-error"
-                        oninput=self.link.callback(|e: InputData| Msg::UebBrailleInput(e.value)) />
-                </div>
-                <div id="ueb-braille-error-row" aria-live="assertive">
-                    <label for="ueb-braille-error">{"UEB Braille Error: "}</label>
-                    <input type="text" id="ueb-braille-error" size="80" readonly=true
-                        value={self.ueb_braille_error.clone()} />
-                </div>
+                { ueb_input }
                 <h2 id="math-display-heading">
                     {"Displayed Math (click to navigate, ESC to exit ["}
                     <a href="https://daisy.github.io/MathCAT/nav-commands.html" target="_blank" rel="noreferrer">{"nav help"}</a>
