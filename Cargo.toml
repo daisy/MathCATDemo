@@ -22,10 +22,13 @@ phf = { version = "0.13", features = ["macros"] }
 # mathcat = { version = "0.6.3", features = ["include-zip"]}
 
 [dependencies.mathcat]
-version = "0.7.7-alpha.1"
+# Local and CI both use a sibling checkout at ../MathCAT/ (see deploy-pages.yml).
+# Locally: keep that clone on the MathCAT branch you are testing.
+# On GitHub Actions: the workflow checks out the latest successful Rust build
+# of daisy/MathCAT main (demo main) or braille-parser (demo braille-parser).
 features = ["include-zip"]
-# for testing MathCAT without having to publish a new version 
-# path = "../MathCAT/"
+path = "../MathCAT/"
+# version = "0.7.7-alpha.1"
 
 
 
