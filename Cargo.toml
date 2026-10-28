@@ -19,7 +19,7 @@ console_log = { version = "0.2.0", optional = true }
 cfg-if = "1.0"
 phf = { version = "0.13", features = ["macros"] }
 
-# mathcat = { version = "0.6.3", features = ["include-zip"]}
+# mathcat = { version = "0.7.8-alpha.1", features = ["include-zip"]}
 
 [dependencies.mathcat]
 # Local and CI both use a sibling checkout at ../MathCAT/ (see deploy-pages.yml).
