@@ -1,0 +1,149 @@
+body {
+  font-family: sans-serif;
+  max-width: 50em;
+  margin: auto;
+}
+
+h2 {
+  margin: 1ex 0 0 0;
+  font-size: 120%;
+}
+
+h2:first-child {
+  margin-top: 0.5em;
+}
+
+.next-group {
+  padding-left: 3em;
+}
+
+#speech-table > tbody > tr > td:first-child,
+#braille-table > tbody > tr > td:first-child {
+  min-width: 11em;
+  white-space: nowrap;
+}
+
+#mathml-input {
+  font-family: monospace;
+  font-size: 100%;
+  padding: 0.3em;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+#render-button {
+  display: block;
+  font-weight: bold;
+  background-color: lightgreen;
+  margin-top: 1ex;
+  margin-bottom: 3ex;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+#braille-input {
+  margin-left: 0.5em;
+}
+
+#braille-error-row {
+  margin-top: 1ex;
+}
+
+#braille-error {
+  color: red;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0;
+}
+
+#mathml-output {
+  font-size: 110%;
+  margin-top: 0em;
+  border: 1px solid grey;
+  padding: 0.25em;
+  min-height: 3em;
+  width: 100%;
+  white-space: pre;
+}
+
+select {
+  appearance: none;
+  outline: 0;
+  background: rgb(176, 236, 176);
+  background-image: none;
+  color: black;
+  cursor: pointer;
+  border: 1px solid black;
+  border-radius: 3px;
+  font: inherit;
+  line-height: 1.2;
+  margin: 0;
+  padding: 0 0.4em;
+  box-sizing: border-box;
+  vertical-align: baseline;
+}
+
+.select {
+  display: inline-block;
+  overflow: hidden;
+  overflow: clip;
+  border-radius: 0.25em;
+  vertical-align: baseline;
+  line-height: 1.2;
+}
+
+#speech-table > tbody > tr:first-child > td:nth-child(2),
+#braille-table > tbody > tr:first-child > td:nth-child(2) {
+  white-space: nowrap;
+}
+
+option {
+  background: rgb(225, 255, 225);
+  color: black;
+  font-size: 90%;
+}
+
+textarea {
+  word-wrap: normal;
+}
+
+#speech, #braille {
+  min-height: 3em;
+  width: 100%;
+  border: 1px solid #AAA;
+  background-color: #F8F8F8;
+  padding: 0.5em 0.5em 0.5em 1.5em;
+  overflow: auto;
+}
+
+#mathml-output:focus-within {
+  outline-width: 2px;
+  outline-style: solid;
+  outline-color: green;
+}
+
+#outer-table {
+  width: 100%;
+}
+
+#braille {
+  font-family: courier;
+  font-size: 150%;
+}
+
+.sync-highlight {
+  color: yellow;
+  background: blue;
+  outline-color: blue;
+  outline-style: solid;
+  outline-width: 1px;
+  outline-offset: 0px;
+}
+
+.nav-highlight {
+  outline-color: orange;
+  outline-style: solid;
+  outline-width: 2px;
+  outline-offset: 0px;
+}
