@@ -34,10 +34,13 @@ h2:first-child {
   margin-left: auto;
   margin-right: auto
 }
-#ueb-braille-error-row {
+#braille-input {
+  margin-left: .5em;
+}
+#braille-error-row {
   margin-top: 1ex;
 }
-#ueb-braille-error {
+#braille-error {
   color: red;
   border: none;
   outline: none;

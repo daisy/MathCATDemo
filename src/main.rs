@@ -36,7 +36,9 @@ enum Msg {
         generation: u64,
     },
     #[cfg(feature = "braille-input")]
-    UebBrailleInput(String),
+    BrailleInput(String),
+    #[cfg(feature = "braille-input")]
+    BrailleInputCode(String),
     NavMode(&'static str),
     NavVerbosity(&'static str),
     Language(String),
@@ -45,7 +47,7 @@ enum Msg {
     SayCaps(&'static str),
     BrailleCode(String),
     BrailleDisplayAs(&'static str),
-    TTS(&'static str),
+    Tts(&'static str),
     Dots(&'static str),
     Navigate(KeyboardEvent),
 }
@@ -75,11 +77,13 @@ struct Model {
     braille: String,
     braille_node_ref: NodeRef,
     #[cfg(feature = "braille-input")]
-    ueb_braille_input: String,
+    braille_input: String,
     #[cfg(feature = "braille-input")]
-    ueb_braille_error: String,
+    braille_input_code: String,
     #[cfg(feature = "braille-input")]
-    ueb_input_generation: u64,
+    braille_error: String,
+    #[cfg(feature = "braille-input")]
+    braille_input_generation: u64,
     tts: String,
 
     update_speech: bool,
@@ -98,33 +102,22 @@ impl Model {
         cookie += &format!("braille_code={};", self.braille_code);
         cookie += &format!("braille_display_as={};", self.braille_display_as);
         cookie += &format!("braille_dots78={};", self.braille_dots78);
+        #[cfg(feature = "braille-input")]
+        {
+            cookie += &format!("braille_input_code={};", self.braille_input_code);
+        }
         cookie += &format!("tts={};", self.tts);
         set_cookie(&cookie);
-    }
-
-    fn apply_pref(key: &str, value: String) {
-        if let Err(e) = set_preference(key.to_string(), value) {
-            error!("Failed to set {} from cookies: {}", key, e);
-        }
     }
 
     fn apply_loaded_preferences(&self) {
         // Nav prefs are needed before the first keypress; the rest must match the UI
         // even if the user generates speech/braille without touching a control.
-        Self::apply_pref("NavMode", self.nav_mode.clone());
-        Self::apply_pref("NavVerbosity", self.nav_verbosity.clone());
-        Self::apply_pref("Language", self.language.clone());
-        Self::apply_pref("SpeechStyle", self.speech_style.clone());
-        Self::apply_pref("Verbosity", self.verbosity.clone());
-        Self::apply_pref(
-            "SpeechOverrides_CapitalLetters",
-            (if self.say_caps { "cap" } else { "" }).to_string(),
-        );
-        let tts = if self.tts == "Off" { "None".to_string() } else { self.tts.clone() };
-        Self::apply_pref("TTS", tts);
-        Self::apply_pref("Bookmark", "true".to_string());
-        Self::apply_pref("BrailleCode", self.braille_code.clone());
-        Self::apply_pref("BrailleNavHighlight", self.braille_dots78.clone());
+        set_pref("NavMode", &self.nav_mode);
+        set_pref("NavVerbosity", &self.nav_verbosity);
+        apply_speech_preferences(self);
+        set_pref("BrailleCode", &self.braille_code);
+        set_pref("BrailleNavHighlight", &self.braille_dots78);
     }
 
     /// Yew 0.18 sets the `selected` *attribute* on `<option>`, which does not update
@@ -152,6 +145,13 @@ impl Model {
                 .iter()
                 .position(|code| code == &self.braille_code),
         );
+        #[cfg(feature = "braille-input")]
+        set_selected(
+            "braille-input-code",
+            BRAILLE_INPUT_CODES
+                .iter()
+                .position(|code| *code == self.braille_input_code),
+        );
     }
 
     fn init_state_from_cookies(&mut self) {
@@ -160,9 +160,8 @@ impl Model {
             let mut key_value = cookie.split('=');
             let key = key_value.next();
             let value = key_value.next();
-            match (key, value) {
-                (Some(key), Some(value)) => set_state(self, key.trim(), value.trim()),
-                _ => (),
+            if let (Some(key), Some(value)) = (key, value) {
+                set_state(self, key.trim(), value.trim());
             }
         }
 
@@ -178,19 +177,140 @@ impl Model {
                 "braille_code" => model.braille_code = value,
                 "braille_display_as" => model.braille_display_as = value,
                 "braille_dots78" => model.braille_dots78 = value,
+                #[cfg(feature = "braille-input")]
+                "braille_input_code" if BRAILLE_INPUT_CODES.contains(&value.as_str()) => {
+                    model.braille_input_code = value;
+                }
                 "tts" => model.tts = value,
                 _ => (),
             }
         }
     }
 }
-static INPUT_MESSAGE: &'static str = "Auto-detect format: override using $...$ for TeX, `...` for ASCIIMath, <math>...</math> for MathML\n";
-static START_FORMULA: &'static str = r"$x = {-b \pm \sqrt{b^2-4ac} \over 2a}$";
+static INPUT_MESSAGE: &str = "Auto-detect format: override using $...$ for TeX, `...` for ASCIIMath, <math>...</math> for MathML\n";
+static START_FORMULA: &str = r"$x = {-b \pm \sqrt{b^2-4ac} \over 2a}$";
 // static START_FORMULA: &'static str = r"$x = {t \over 2a}$";
 
 /// North American ASCII braille: index is (Unicode braille - 0x2800) & 0x3F.
 static UNICODE_TO_ASCII_BRAILLE: &str =
     " A1B'K2L@CIF/MSP\"E3H9O6R^DJG>NTQ,*5<-U8V.%[$+X!&;:4\\0Z7(_?W]#Y)=";
+
+fn uses_computer_braille(code: &str) -> bool {
+    code == "ASCIIMath" || code == "LaTeX"
+}
+
+#[cfg(feature = "braille-input")]
+fn is_braille_cell(c: char) -> bool {
+    (0x2800..=0x28FF).contains(&(c as u32))
+}
+
+fn set_pref(key: &str, value: impl AsRef<str>) {
+    if let Err(e) = set_preference(key, value.as_ref()) {
+        error!("Failed to set {}: {}", key, e);
+    }
+}
+
+fn tts_preference(tts: &str) -> &str {
+    if tts == "Off" { "None" } else { tts }
+}
+
+fn apply_speech_preferences(model: &Model) {
+    set_pref("Verbosity", &model.verbosity);
+    set_pref(
+        "SpeechOverrides_CapitalLetters",
+        if model.say_caps { "cap" } else { "" },
+    );
+    set_pref("Language", &model.language);
+    set_pref("SpeechStyle", &model.speech_style);
+    set_pref("TTS", tts_preference(&model.tts));
+    set_pref("Bookmark", "true");
+}
+
+fn queue_math(link: ComponentLink<Model>, pending: PendingMath, generation: u64) {
+    spawn_local(async move {
+        let math_string = convert_and_render_math(pending).await;
+        link.send_message(Msg::MathReady {
+            math_string,
+            auto_speak: true,
+            generation,
+        });
+    });
+}
+
+/// North American Braille Computer Code. Printable ASCII uses the 6-dot cell from
+/// `UNICODE_TO_ASCII_BRAILLE`. Dot 7 selects the uppercase block (@, A-Z, brackets, ^).
+/// The same cell without dot 7 is the lowercase block (grave, a-z, braces, |, ~).
+/// Underscore has no dot 7. Dot 8 is ignored so both 6-dot and 8-dot cells decode.
+#[cfg(feature = "braille-input")]
+fn computer_braille_cell_to_char(cell: u32) -> char {
+    let index = ((cell - 0x2800) & 0x3F) as usize;
+    let table_char = UNICODE_TO_ASCII_BRAILLE.chars().nth(index).unwrap();
+    let dot7 = (cell & 0x40) != 0;
+    let t = table_char as u32;
+    match t {
+        0x20..=0x3F => table_char,
+        0x5F => {
+            if dot7 { '\u{7F}' } else { '_' }
+        }
+        0x40..=0x5E => {
+            if dot7 {
+                table_char
+            } else {
+                char::from_u32(t + 0x20).unwrap()
+            }
+        }
+        _ => table_char,
+    }
+}
+
+#[cfg(feature = "braille-input")]
+fn computer_braille_to_text(input: &str) -> String {
+    input.chars().map(|ch| {
+        let u = ch as u32;
+        if is_braille_cell(ch) {
+            computer_braille_cell_to_char(u)
+        } else {
+            ch
+        }
+    }).collect()
+}
+
+fn char_to_8dot_braille(ch: char) -> char {
+    let c = ch as u32;
+    let (table_char, dot7) = match c {
+        0x20..=0x3F => (ch, false),
+        0x40..=0x5E => (ch, true),
+        0x5F => ('_', false),
+        0x60..=0x7E => (char::from_u32(c - 0x20).unwrap(), false),
+        _ => return ch,
+    };
+    // The table is ASCII, so the byte index is the 6-dot cell.
+    let Some(index) = UNICODE_TO_ASCII_BRAILLE.find(table_char) else {
+        return ch;
+    };
+    let mut bits = index as u32;
+    if dot7 {
+        bits |= 0x40;
+    }
+    char::from_u32(0x2800 + bits).unwrap()
+}
+
+fn ascii_to_8dot_braille(text: &str) -> String {
+    text.chars().map(char_to_8dot_braille).collect()
+}
+
+fn escape_html(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => result.push_str("&amp;"),
+            '<' => result.push_str("&lt;"),
+            '>' => result.push_str("&gt;"),
+            _ => result.push(ch),
+        }
+    }
+    result
+}
 
 enum PendingMath {
     Convert { content: String, format: &'static str },
@@ -200,11 +320,11 @@ enum PendingMath {
 static MATH_ERROR: &str = "Unrecognized Math -- use $...$ for TeX, `...` for ASCIIMath, or enter MathML";
 
 #[cfg(feature = "braille-input")]
+const BRAILLE_INPUT_CODES: &[&str] = &["UEB", "Nemeth", "ASCIIMath", "LaTeX"];
+
+#[cfg(feature = "braille-input")]
 fn is_unicode_braille_text(s: &str) -> bool {
-    s.chars().all(|c| {
-        let u = c as u32;
-        (0x2800..=0x28FF).contains(&u) || c.is_whitespace()
-    })
+    s.chars().all(|c| is_braille_cell(c) || c.is_whitespace())
 }
 
 /// Map North American ASCII braille to Unicode braille cells (U+2800..).
@@ -237,6 +357,34 @@ fn ensure_unicode_braille(input: &str) -> String {
     }
 }
 
+/// A typed space next to Unicode braille is the blank cell, not U+0020.
+#[cfg(feature = "braille-input")]
+fn spaces_as_braille_blanks(input: &str) -> String {
+    let has_braille = input.chars().any(is_braille_cell);
+    if has_braille {
+        input.replace(' ', "\u{2800}")
+    } else {
+        input.to_string()
+    }
+}
+
+/// ASCIIMath and LaTeX accept literal text, or 6-dot / 8-dot computer braille
+/// which is converted back to that text. UEB and Nemeth accept Unicode braille
+/// or North American ASCII braille.
+#[cfg(feature = "braille-input")]
+fn braille_input_text(input: &str, code: &str) -> String {
+    let input = spaces_as_braille_blanks(input);
+    if uses_computer_braille(code) {
+        if is_unicode_braille_text(&input) {
+            computer_braille_to_text(&input)
+        } else {
+            input
+        }
+    } else {
+        ensure_unicode_braille(&input)
+    }
+}
+
 async fn convert_and_render_math(pending: PendingMath) -> String {
     let mut mathml = match pending {
         PendingMath::Convert { content, format } => {
@@ -257,7 +405,7 @@ async fn convert_and_render_math(pending: PendingMath) -> String {
     match set_mathml(mathml) {
         Ok(m) => {
             let math = m.trim_end().to_string();
-            debug!("MathML with ids: \n{}", &math);
+            debug!("MathML with ids: \n{}", math);
             JsFuture::from(typeset_mathml(&math))
                 .await
                 .unwrap();
@@ -275,7 +423,7 @@ async fn convert_and_render_math(pending: PendingMath) -> String {
 
 /// get text for level 1 header
 fn get_header() -> String {
-    return format!("MathCAT Demo (using v{})", get_version());
+    format!("MathCAT Demo (using v{})", get_version())
 }
 
 
@@ -295,11 +443,8 @@ fn selected_from_list(e: ChangeData, items: &[String], fallback: &str) -> String
 
 fn apply_braille_code(component: &Model) {
     // MathCAT defaults to Nemeth. Keep it aligned with the dropdown even when there is no math yet.
-    if component.braille_code.is_empty() {
-        return;
-    }
-    if let Err(e) = set_preference("BrailleCode".to_string(), component.braille_code.clone()) {
-        error!("Failed to set BrailleCode: {}", e);
+    if !component.braille_code.is_empty() {
+        set_pref("BrailleCode", &component.braille_code);
     }
 }
 
@@ -310,14 +455,7 @@ fn update_speech_and_braille(component: &mut Model) {
     }
 
     if component.update_speech {
-        set_preference("Verbosity".to_string(), component.verbosity.clone()).unwrap();
-        set_preference("SpeechOverrides_CapitalLetters".to_string(),
-             (if component.say_caps {"cap"} else {""}).to_string()).unwrap();
-        set_preference("Language".to_string(), component.language.clone()).unwrap();
-        set_preference("SpeechStyle".to_string(), component.speech_style.clone()).unwrap();
-        let tts = if component.tts == "Off" {"None".to_string()} else {component.tts.clone()};
-        set_preference("TTS".to_string(), tts).unwrap();
-        set_preference("Bookmark".to_string(), "true".to_string()).unwrap();
+        apply_speech_preferences(component);
         let speech = match get_spoken_text() {
             Ok(text) => text,
             Err(e) => errors_to_string(&e),
@@ -330,7 +468,7 @@ fn update_speech_and_braille(component: &mut Model) {
     }
 
     // After speech prefs: MathCAT's default is Nemeth, and Language/SpeechStyle reloads
-    // must not leave that default in place while the dropdown shows UEB.
+    // must not leave that default in place while the Braille Code dropdown shows another code.
     apply_braille_code(component);
 
     if component.speak && component.tts != "Off" {
@@ -339,12 +477,27 @@ fn update_speech_and_braille(component: &mut Model) {
     }
 
     if component.update_braille {
-        set_preference("BrailleNavHighlight".to_string(), component.braille_dots78.clone()).unwrap();
-        let mut braille = match get_braille(component.nav_id.clone()) {
-            Ok(str) => str,
-            Err(e) => errors_to_string(&e),
+        set_pref("BrailleNavHighlight", &component.braille_dots78);
+        // The math display already shows an <merror>. Don't braille that message.
+        let mut braille = if component.math_string.contains("<merror") {
+            String::new()
+        } else {
+            match get_braille(component.nav_id.clone()) {
+                Ok(str) => str,
+                Err(e) => {
+                    error!("{}", errors_to_string(&e));
+                    String::new()
+                }
+            }
         };
-        if component.braille_display_as == "ASCIIBraille" {
+        if uses_computer_braille(&component.braille_code) {
+            // These codes come back as ASCII text. Dots shows North American 8-dot computer braille.
+            braille = if component.braille_display_as == "Dots" {
+                ascii_to_8dot_braille(&braille)
+            } else {
+                escape_html(&braille)
+            };
+        } else if component.braille_display_as == "ASCIIBraille" {
             lazy_static! {
                 static ref UNICODE_TO_ASCII: Vec<char> =
                     UNICODE_TO_ASCII_BRAILLE.chars().collect();
@@ -370,6 +523,84 @@ fn update_speech_and_braille(component: &mut Model) {
         }
         component.braille = braille;    
         component.update_braille = false;
+    }
+}
+
+#[cfg(feature = "braille-input")]
+fn convert_braille_input(model: &mut Model) {
+    model.braille_input_generation = model.braille_input_generation.wrapping_add(1);
+    stop_speech();
+    model.speak = false;
+
+    let text = model.braille_input.trim().to_string();
+    if text.is_empty() {
+        // A deleted input should not leave the previous expression on screen.
+        model.braille_error.clear();
+        model.math_string.clear();
+        model.speech.clear();
+        model.braille.clear();
+        model.nav_id.clear();
+        model.nav_offset = 0;
+        model.speak = false;
+        model.update_speech = false;
+        model.update_braille = false;
+        let _ = set_mathml("<math></math>");
+        spawn_local(async {
+            let _ = JsFuture::from(show_math_error("")).await;
+        });
+        return;
+    }
+
+    let code = model.braille_input_code.clone();
+    model.braille_code = code.clone();
+    set_pref("BrailleCode", &code);
+    let notation = braille_input_text(&text, &code);
+    // LaTeX uses MathCAT's parser so incomplete input (`\frac`, `2^`) stays in
+    // the tree. MathJax's TeX converter rejects those.
+    let pending = match set_mathml_from_braille(&notation, &code) {
+        Ok(mathml) => PendingMath::AlreadyMathML(mathml),
+        Err(e) => {
+            let message = errors_to_string(&e);
+            error!("Braille input error: {}", message);
+            model.braille_error = message;
+            return;
+        }
+    };
+    model.braille_error.clear();
+    let generation = model.braille_input_generation;
+    queue_math(model.link.clone(), pending, generation);
+}
+
+fn radio(
+    link: &ComponentLink<Model>,
+    id: &'static str,
+    name: &'static str,
+    label: &'static str,
+    checked: bool,
+    msg: impl Fn(MouseEvent) -> Msg + 'static,
+) -> Html {
+    html! {
+        <>
+            <input type="radio" id={id} name={name} value={id}
+                checked={checked}
+                onclick=link.callback(msg) />
+            <label for={id}>{label}</label>
+        </>
+    }
+}
+
+fn option_list<'a>(items: impl IntoIterator<Item = &'a str>, current: &str) -> Html {
+    let current = current.to_string();
+    html! {
+        <>
+            { for items.into_iter().map(|item| {
+                let item = item.to_string();
+                let selected = current == item;
+                html! {
+                    <option key={item.clone()} value={item.clone()} selected={selected}>{item}</option>
+                }
+            }) }
+        </>
     }
 }
 
@@ -402,11 +633,13 @@ impl Component for Model {
             braille: String::default(),
             braille_node_ref: NodeRef::default(),
             #[cfg(feature = "braille-input")]
-            ueb_braille_input: String::default(),
+            braille_input: String::default(),
             #[cfg(feature = "braille-input")]
-            ueb_braille_error: String::default(),
+            braille_input_code: "UEB".to_string(),
             #[cfg(feature = "braille-input")]
-            ueb_input_generation: 0,
+            braille_error: String::default(),
+            #[cfg(feature = "braille-input")]
+            braille_input_generation: 0,
             tts: "SSML".to_string(),
 
             update_speech: true,
@@ -415,10 +648,10 @@ impl Component for Model {
         };
         
         initial_state.init_state_from_cookies();
-        if let Err(e) = set_rules_dir("Rules".to_string()) {
-            error!("Didn't find rules dir: {}", e.to_string());
+        if let Err(e) = set_rules_dir("Rules") {
+            error!("Didn't find rules dir: {}", e);
         };
-        set_preference("CheckRuleFiles".to_string(), "None".to_string()).unwrap();
+        set_preference("CheckRuleFiles", "None").unwrap();
         match get_supported_languages() {
             Ok(langs) => initial_state.supported_languages = langs,
             Err(e) => error!("Failed to get supported languages: {}", e),
@@ -429,7 +662,7 @@ impl Component for Model {
         }
         initial_state.apply_loaded_preferences();
 
-        return initial_state;
+        initial_state
     }
 
     fn update(&mut self, msg: Self::Message) -> ShouldRender {
@@ -449,7 +682,7 @@ impl Component for Model {
                     let math_str = get_text_of_element("mathml-input");
                     let math_str = math_str.replace(INPUT_MESSAGE, "").replace("\n", " ").trim().to_string();
                     let pending = if let Some(caps) = TEX.captures(&math_str) {
-                        debug!("TeX: '{}'", &math_str);
+                        debug!("TeX: '{}'", math_str);
                         PendingMath::Convert {
                             content: caps["math"].to_string(),
                             format: "TeX",
@@ -469,17 +702,13 @@ impl Component for Model {
                         }
                     };
 
-                    let link = self.link.clone();
-                    spawn_local(async move {
-                        let math_string = convert_and_render_math(pending).await;
-                        link.send_message(Msg::MathReady { math_string, auto_speak: true, generation: 0 });
-                    });
+                    queue_math(self.link.clone(), pending, 0);
                 };
                 should_render = false;
             },
             Msg::MathReady { math_string, auto_speak, generation } => {
                 #[cfg(feature = "braille-input")]
-                if generation != 0 && generation != self.ueb_input_generation {
+                if generation != 0 && generation != self.braille_input_generation {
                     should_render = false;
                 }
                 #[cfg(not(feature = "braille-input"))]
@@ -498,61 +727,34 @@ impl Component for Model {
                 }
             },
             #[cfg(feature = "braille-input")]
-            Msg::UebBrailleInput(text) => {
-                if text == self.ueb_braille_input {
+            Msg::BrailleInput(text) => {
+                if text == self.braille_input {
                     should_render = false;
                 } else {
-                    self.ueb_braille_input = text.clone();
-                    self.ueb_input_generation = self.ueb_input_generation.wrapping_add(1);
-                    stop_speech();
-                    self.speak = false;
-
-                    if text.trim().is_empty() {
-                        self.ueb_braille_error.clear();
-                    } else {
-                        self.braille_code = "UEB".to_string();
-                        if let Err(e) = set_preference("BrailleCode".to_string(), "UEB".to_string()) {
-                            error!("Failed to set BrailleCode to UEB: {}", e);
-                        }
-
-                        let unicode_braille = ensure_unicode_braille(text.trim());
-                        match set_mathml_from_braille(&unicode_braille) {
-                            Ok(mathml) => {
-                                self.ueb_braille_error.clear();
-                                let generation = self.ueb_input_generation;
-                                let link = self.link.clone();
-                                spawn_local(async move {
-                                    let math_string = convert_and_render_math(
-                                        PendingMath::AlreadyMathML(mathml),
-                                    )
-                                    .await;
-                                    link.send_message(Msg::MathReady {
-                                        math_string,
-                                        auto_speak: true,
-                                        generation,
-                                    });
-                                });
-                            }
-                            Err(e) => {
-                                let message = errors_to_string(&e);
-                                error!("UEB braille input error: {}", message);
-                                self.ueb_braille_error = message;
-                            }
-                        }
-                    }
+                    self.braille_input = text;
+                    convert_braille_input(self);
+                }
+            },
+            #[cfg(feature = "braille-input")]
+            Msg::BrailleInputCode(code) => {
+                if code == self.braille_input_code {
+                    should_render = false;
+                } else {
+                    self.braille_input_code = code;
+                    convert_braille_input(self);
                 }
             },
             Msg::NavMode(text) => {
                 self.nav_mode = text.to_string();
-                set_preference("NavMode".to_string(), text.to_string()).unwrap();
+                set_pref("NavMode", text);
             },
             Msg::NavVerbosity(text) => {
                 self.nav_verbosity = text.to_string();
-                set_preference("NavVerbosity".to_string(), text.to_string()).unwrap();
+                set_pref("NavVerbosity", text);
             },
             Msg::Language(text) => {
                 self.language = text;
-                Self::apply_pref("Language", self.language.clone());
+                set_pref("Language", &self.language);
                 self.update_speech = true;
             },
             Msg::SpeechStyle(text) => {
@@ -569,14 +771,14 @@ impl Component for Model {
             },
             Msg::BrailleCode(text) => {
                 self.braille_code = text;
-                Self::apply_pref("BrailleCode", self.braille_code.clone());
+                set_pref("BrailleCode", &self.braille_code);
                 self.update_braille = true;
             },
             Msg::BrailleDisplayAs(text) => {
                 self.braille_display_as = text.to_string();
                 self.update_braille = true;
             },
-            Msg::TTS(text) => {
+            Msg::Tts(text) => {
                 self.tts = text.to_string();
                 self.update_speech = true;
             },
@@ -614,7 +816,7 @@ impl Component for Model {
                             self.nav_id = id_and_offset.0;
                             self.nav_offset = id_and_offset.1;
                             highlight_nav_element(&self.nav_id, self.nav_offset);
-                            self.nav_mode = get_preference("NavMode".to_string()).unwrap();
+                            self.nav_mode = get_preference("NavMode").unwrap();
                             self.speak = true;
                             self.update_braille = true;
                         },
@@ -630,7 +832,7 @@ impl Component for Model {
             update_speech_and_braille(self);
         }
         self.save_state();
-        return should_render;
+        should_render
     }
 
     fn change(&mut self, _props: Self::Properties) -> ShouldRender {
@@ -654,24 +856,36 @@ impl Component for Model {
         });
 
         #[cfg(feature = "braille-input")]
-        let ueb_input = html! {
-            <>
-                <div>
-                    <label for="ueb-braille-input">{"UEB Braille Input: "}</label>
-                    <input type="text" id="ueb-braille-input" size="80" autocorrect="off"
-                        autocomplete="off"
-                        aria-describedby="ueb-braille-error"
-                        oninput=self.link.callback(|e: InputData| Msg::UebBrailleInput(e.value)) />
-                </div>
-                <div id="ueb-braille-error-row" aria-live="assertive">
-                    <label for="ueb-braille-error">{"UEB Braille Error: "}</label>
-                    <input type="text" id="ueb-braille-error" size="80" readonly=true
-                        value={self.ueb_braille_error.clone()} />
-                </div>
-            </>
+        let braille_input_ui = {
+            let codes: Vec<String> = BRAILLE_INPUT_CODES.iter().map(|code| code.to_string()).collect();
+            let current = self.braille_input_code.clone();
+            let on_braille_input_code = self.link.callback(move |e: ChangeData| {
+                Msg::BrailleInputCode(selected_from_list(e, &codes, &current))
+            });
+            html! {
+                <>
+                    <div id="braille-input-row">
+                        <label id="braille-input-code-label" for="braille-input-code">{"Braille Input: "}</label>
+                        <span class="select"><select name="braille_input_code" id="braille-input-code" aria-labelledby="braille-input-code-label"
+                            onchange=on_braille_input_code>
+                        { option_list(BRAILLE_INPUT_CODES.iter().copied(), &self.braille_input_code) }
+                        </select></span>
+                        <input type="text" id="braille-input" size="80" autocorrect="off"
+                            autocomplete="off"
+                            aria-label="Braille input"
+                            aria-describedby="braille-error"
+                            oninput=self.link.callback(|e: InputData| Msg::BrailleInput(e.value)) />
+                    </div>
+                    <div id="braille-error-row" aria-live="assertive">
+                        <label for="braille-error">{"Braille Error: "}</label>
+                        <input type="text" id="braille-error" size="80" readonly=true
+                            value={self.braille_error.clone()} />
+                    </div>
+                </>
+            }
         };
         #[cfg(not(feature = "braille-input"))]
-        let ueb_input = Html::default();
+        let braille_input_ui = Html::default();
 
         html! {
             <div>
@@ -688,45 +902,27 @@ impl Component for Model {
                 <input type="button" value="Generate Speech and Braille" id="render-button"
                     onclick=self.link.callback(|_| Msg::NewMathML) />
                 </div>
-                { ueb_input }
+                { braille_input_ui }
                 <h2 id="math-display-heading">
                     {"Displayed Math (click to navigate, ESC to exit ["}
                     <a href="https://daisy.github.io/MathCAT/nav-commands.html" target="_blank" rel="noreferrer">{"nav help"}</a>
                     {"])"}
                 </h2>
-                <table role="presentation"><tr> // 2x3 table on left
+                <table role="presentation"><tr>
                         <td>{"Navigation Mode:"}</td>
-                        <td><input type="radio" id="Enhanced" name="nav_mode"
-                                checked = {self.nav_mode == "Enhanced"}
-                                onclick=self.link.callback(|_| Msg::NavMode("Enhanced"))/>
-                        <label for="Enhanced">{"Enhanced"}</label></td>
-                        <td><input type="radio" id="Simple" name="nav_mode" value="Simple"
-                                checked = {self.nav_mode == "Simple"}                           
-                                onclick=self.link.callback(|_| Msg::NavMode("Simple"))/>
-                            <label for="Simple">{"Simple"}</label></td>
-                        <td><input type="radio" id="Character" name="nav_mode" value="Character"
-                                checked = {self.nav_mode == "Character"}                           
-                                onclick=self.link.callback(|_| Msg::NavMode("Character"))/>
-                            <label for="Character">{"Character"}</label></td>
+                        <td>{ radio(&self.link, "Enhanced", "nav_mode", "Enhanced", self.nav_mode == "Enhanced", |_| Msg::NavMode("Enhanced")) }</td>
+                        <td>{ radio(&self.link, "Simple", "nav_mode", "Simple", self.nav_mode == "Simple", |_| Msg::NavMode("Simple")) }</td>
+                        <td>{ radio(&self.link, "Character", "nav_mode", "Character", self.nav_mode == "Character", |_| Msg::NavMode("Character")) }</td>
                     </tr><tr>
                         <td>{"Navigation Verbosity:"}</td>
-                        <td><input type="radio" id="NavTerse" name="nav_verbosity" value="Terse"
-                                checked = {self.nav_verbosity == "Terse"}
-                                onclick=self.link.callback(|_| Msg::NavVerbosity("Terse"))/>
-                            <label for="NavTerse">{"Terse"}</label></td>
-                        <td><input type="radio" id="NavMedium" name="nav_verbosity" value="Medium"
-                                checked = {self.nav_verbosity == "Medium"}
-                                onclick=self.link.callback(|_| Msg::NavVerbosity("Medium"))/>
-                            <label for="NavMedium">{"Medium"}</label></td>
-                        <td><input type="radio" id="NavVerbose" name="nav_verbosity" value="Verbose"
-                                checked = {self.nav_verbosity == "Verbose"}
-                                onclick=self.link.callback(|_| Msg::NavVerbosity("Verbose"))/>
-                            <label for="NavVerbose">{"Verbose"}</label></td>
+                        <td>{ radio(&self.link, "NavTerse", "nav_verbosity", "Terse", self.nav_verbosity == "Terse", |_| Msg::NavVerbosity("Terse")) }</td>
+                        <td>{ radio(&self.link, "NavMedium", "nav_verbosity", "Medium", self.nav_verbosity == "Medium", |_| Msg::NavVerbosity("Medium")) }</td>
+                        <td>{ radio(&self.link, "NavVerbose", "nav_verbosity", "Verbose", self.nav_verbosity == "Verbose", |_| Msg::NavVerbosity("Verbose")) }</td>
                     </tr></table>
                 <div role="application" id="mathml-output" tabindex="0"
                         aria-labelledby="math-display-heading"
                         aria-roledescription="navigable displayed math"
-                        onkeydown=self.link.callback(|ev| Msg::Navigate(ev))>
+                        onkeydown=self.link.callback(Msg::Navigate)>
                     {self.display.clone()}
                 </div>
                 
@@ -736,51 +932,23 @@ impl Component for Model {
                         <td colspan="3"><label id="language-label" for="language">{"Language: "}</label>
                             <span class="select"><select name="language" id="language" aria-labelledby="language-label"
                                 onchange=on_language>
-                            { for self.supported_languages.iter().map(|lang| {
-                                html! {
-                                    <option key={lang.clone()} value={lang.clone()} selected={self.language == *lang}>{lang}</option>
-                                }
-                            }) }
+                            { option_list(self.supported_languages.iter().map(String::as_str), &self.language) }
                             </select></span>
                         </td>
                     </tr><tr>
                         <td>{"Speech Style:"}</td>
-                        <td><input type="radio" id="ClearSpeak" name="speech_style"
-                                checked = {self.speech_style == "ClearSpeak"}
-                                onclick=self.link.callback(|_| Msg::SpeechStyle("ClearSpeak"))/>
-                        <label for="ClearSpeak">{"ClearSpeak"}</label></td>
-                        <td><input type="radio" id="SimpleSpeak" name="speech_style" value="SimpleSpeak"
-                                checked = {self.speech_style == "SimpleSpeak"}                           
-                                onclick=self.link.callback(|_| Msg::SpeechStyle("SimpleSpeak"))/>
-                            <label for="SimpleSpeak">{"SimpleSpeak"}</label></td>
+                        <td>{ radio(&self.link, "ClearSpeak", "speech_style", "ClearSpeak", self.speech_style == "ClearSpeak", |_| Msg::SpeechStyle("ClearSpeak")) }</td>
+                        <td>{ radio(&self.link, "SimpleSpeak", "speech_style", "SimpleSpeak", self.speech_style == "SimpleSpeak", |_| Msg::SpeechStyle("SimpleSpeak")) }</td>
                         <td/>
                         <td class="next-group">{"TTS:"}</td>
-                        <td><input type="radio" id="Off" name="tts"
-                                checked = {self.tts == "Off"}
-                                onclick=self.link.callback(|_| Msg::TTS("Off"))/>
-                            <label for="Off">{"Off"}</label></td>
-                        <td><input type="radio" id="Plain" name="tts"
-                                checked = {self.tts == "None"}
-                                onclick=self.link.callback(|_| Msg::TTS("None"))/>
-                            <label for="Plain">{"Plain"}</label></td>
-                        <td><input type="radio" id="SSML" name="tts" value="SSML"
-                                checked = {self.tts == "SSML"}                           
-                                onclick=self.link.callback(|_| Msg::TTS("SSML"))/>
-                            <label for="SSML">{"SSML"}</label></td>
+                        <td>{ radio(&self.link, "Off", "tts", "Off", self.tts == "Off", |_| Msg::Tts("Off")) }</td>
+                        <td>{ radio(&self.link, "Plain", "tts", "Plain", self.tts == "None", |_| Msg::Tts("None")) }</td>
+                        <td>{ radio(&self.link, "SSML", "tts", "SSML", self.tts == "SSML", |_| Msg::Tts("SSML")) }</td>
                     </tr><tr>
                         <td>{"Speech Verbosity:"}</td>
-                        <td><input type="radio" id="Terse" name="verbosity" value="Terse"
-                                checked = {self.verbosity == "Terse"}
-                                onclick=self.link.callback(|_| Msg::SpeechVerbosity("Terse"))/>
-                            <label for="Terse">{"Terse"}</label></td>
-                        <td><input type="radio" id="Medium" name="verbosity" value="Medium"
-                                checked = {self.verbosity == "Medium"}
-                                onclick=self.link.callback(|_| Msg::SpeechVerbosity("Medium"))/>
-                            <label for="Medium">{"Medium"}</label></td>
-                        <td><input type="radio" id="Verbose" name="verbosity" value="Verbose"
-                                checked = {self.verbosity == "Verbose"}
-                                onclick=self.link.callback(|_| Msg::SpeechVerbosity("Verbose"))/>
-                            <label for="Verbose">{"Verbose"}</label></td>
+                        <td>{ radio(&self.link, "Terse", "verbosity", "Terse", self.verbosity == "Terse", |_| Msg::SpeechVerbosity("Terse")) }</td>
+                        <td>{ radio(&self.link, "Medium", "verbosity", "Medium", self.verbosity == "Medium", |_| Msg::SpeechVerbosity("Medium")) }</td>
+                        <td>{ radio(&self.link, "Verbose", "verbosity", "Verbose", self.verbosity == "Verbose", |_| Msg::SpeechVerbosity("Verbose")) }</td>
                         <td><label for="Cap" class="next-group">{"Say \"cap\""}</label></td>
                         <td><input type="checkbox" id="Cap" name="say-cap"
                                 checked = {self.say_caps}
@@ -797,42 +965,19 @@ impl Component for Model {
                         <td colspan="3"><label id="braille-code-label" for="braille_code">{"Braille Code: "}</label>
                             <span class="select"><select name="braille_code" id="braille_code" aria-labelledby="braille-code-label"
                                 onchange=on_braille_code>
-                            { for self.supported_braille_codes.iter().map(|code| {
-                                html! {
-                                    <option key={code.clone()} value={code.clone()} selected={self.braille_code == *code}>{code}</option>
-                                }
-                            }) }
+                            { option_list(self.supported_braille_codes.iter().map(String::as_str), &self.braille_code) }
                             </select></span>
                         </td>
                     </tr><tr>
                         <td>{"View Braille As:"}</td>
-                        <td><input type="radio" id="Dots" name="view_braille_as" value="Dots"
-                                checked = {self.braille_display_as == "Dots"}
-                                onclick=self.link.callback(|_| Msg::BrailleDisplayAs("Dots"))/>
-                            <label for="Dots">{"Dots"}</label></td>
-                        <td><input type="radio" id="ASCIIBraille" name="view_braille_as" value="ASCIIBraille"
-                                checked = {self.braille_display_as == "ASCIIBraille"}
-                                onclick=self.link.callback(|_| Msg::BrailleDisplayAs("ASCIIBraille"))/>
-                                <label for="ASCIIBraille">{"ASCIIBraille"}</label>
-                        </td>
+                        <td>{ radio(&self.link, "Dots", "view_braille_as", "Dots", self.braille_display_as == "Dots", |_| Msg::BrailleDisplayAs("Dots")) }</td>
+                        <td>{ radio(&self.link, "ASCIIBraille", "view_braille_as", "ASCIIBraille", self.braille_display_as == "ASCIIBraille", |_| Msg::BrailleDisplayAs("ASCIIBraille")) }</td>
                         <td/>
                         <td class="next-group">{"Navigation Indicator:"}</td>
-                        <td><input type="radio" id="DotsOff" name="dots-78"
-                                checked = {self.braille_dots78 == "Off"}
-                                onclick=self.link.callback(|_| Msg::Dots("Off"))/>
-                            <label for="DotsOff">{"Off"}</label></td>
-                        <td><input type="radio" id="DotsFirstChar" name="dots-78"
-                                checked = {self.braille_dots78 == "FirstChar"}
-                                onclick=self.link.callback(|_| Msg::Dots("FirstChar"))/>
-                            <label for="DotsFirstChar">{"FirstChar"}</label></td>
-                        <td><input type="radio" id="DotsEndPoints" name="dots-78" value="EndPoints"
-                                checked = {self.braille_dots78 == "EndPoints"}                           
-                                onclick=self.link.callback(|_| Msg::Dots("EndPoints"))/>
-                            <label for="DotsEndPoints">{"EndPoints"}</label></td>
-                        <td><input type="radio" id="DotsAll" name="dots-78" value="All"
-                                checked = {self.braille_dots78 == "All"}                           
-                                onclick=self.link.callback(|_| Msg::Dots("All"))/>
-                            <label for="DotsAll">{"All"}</label></td>
+                        <td>{ radio(&self.link, "DotsOff", "dots-78", "Off", self.braille_dots78 == "Off", |_| Msg::Dots("Off")) }</td>
+                        <td>{ radio(&self.link, "DotsFirstChar", "dots-78", "FirstChar", self.braille_dots78 == "FirstChar", |_| Msg::Dots("FirstChar")) }</td>
+                        <td>{ radio(&self.link, "DotsEndPoints", "dots-78", "EndPoints", self.braille_dots78 == "EndPoints", |_| Msg::Dots("EndPoints")) }</td>
+                        <td>{ radio(&self.link, "DotsAll", "dots-78", "All", self.braille_dots78 == "All", |_| Msg::Dots("All")) }</td>
                     </tr>
                 </table>
                 <div role="textbox" aria-readonly="true" tabindex="0" aria-labelledby="braille-heading" id="braille"
