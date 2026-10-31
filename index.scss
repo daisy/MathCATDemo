@@ -25,6 +25,10 @@ h2:first-child {
   width: 100%;
   box-sizing: border-box;
 }
+#mathml-input.stale-input,
+#braille-input.stale-input {
+  color: gray;
+}
 #render-button {
   display: block;
   font-weight: bold;

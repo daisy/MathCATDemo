@@ -50,6 +50,17 @@ enum Msg {
     Tts(&'static str),
     Dots(&'static str),
     Navigate(KeyboardEvent),
+    /// A keystroke in the math box. Used to restore text that braille input had greyed out.
+    MathInputEdited,
+}
+
+/// Which input last produced the displayed math, speech, and braille.
+#[cfg(feature = "braille-input")]
+#[derive(Clone, Copy, PartialEq)]
+enum OutputSource {
+    None,
+    Math,
+    Braille,
 }
 
 struct Model {
@@ -84,6 +95,13 @@ struct Model {
     braille_error: String,
     #[cfg(feature = "braille-input")]
     braille_input_generation: u64,
+    #[cfg(feature = "braille-input")]
+    output_source: OutputSource,
+    /// Set when the user types in an input whose text is currently grey.
+    #[cfg(feature = "braille-input")]
+    math_input_revised: bool,
+    #[cfg(feature = "braille-input")]
+    braille_input_revised: bool,
     tts: String,
 
     update_speech: bool,
@@ -108,6 +126,33 @@ impl Model {
         }
         cookie += &format!("tts={};", self.tts);
         set_cookie(&cookie);
+    }
+
+    #[cfg(feature = "braille-input")]
+    fn math_input_class(&self) -> &'static str {
+        if self.output_source == OutputSource::Braille &&
+           !self.math_input_revised
+        {
+            "stale-input"
+        } else {
+            ""
+        }
+    }
+
+    #[cfg(feature = "braille-input")]
+    fn braille_input_class(&self) -> &'static str {
+        if self.output_source == OutputSource::Math &&
+           !self.braille_input_revised
+        {
+            "stale-input"
+        } else {
+            ""
+        }
+    }
+
+    #[cfg(not(feature = "braille-input"))]
+    fn math_input_class(&self) -> &'static str {
+        ""
     }
 
     fn apply_loaded_preferences(&self) {
@@ -535,6 +580,7 @@ fn convert_braille_input(model: &mut Model) {
     let text = model.braille_input.trim().to_string();
     if text.is_empty() {
         // A deleted input should not leave the previous expression on screen.
+        model.output_source = OutputSource::None;
         model.braille_error.clear();
         model.math_string.clear();
         model.speech.clear();
@@ -640,6 +686,12 @@ impl Component for Model {
             braille_error: String::default(),
             #[cfg(feature = "braille-input")]
             braille_input_generation: 0,
+            #[cfg(feature = "braille-input")]
+            output_source: OutputSource::None,
+            #[cfg(feature = "braille-input")]
+            math_input_revised: false,
+            #[cfg(feature = "braille-input")]
+            braille_input_revised: false,
             tts: "SSML".to_string(),
 
             update_speech: true,
@@ -724,13 +776,35 @@ impl Component for Model {
                     self.update_braille = true;
                     self.update_speech = true;
                     self.auto_speak = auto_speak;
+                    #[cfg(feature = "braille-input")]
+                    {
+                        self.output_source = if generation == 0 {
+                            OutputSource::Math
+                        } else {
+                            OutputSource::Braille
+                        };
+                        self.math_input_revised = false;
+                        self.braille_input_revised = false;
+                    }
                 }
+            },
+            Msg::MathInputEdited => {
+                #[cfg(feature = "braille-input")]
+                if self.output_source == OutputSource::Braille &&
+                   !self.math_input_revised
+                {
+                    self.math_input_revised = true;
+                    return true;
+                }
+                return false;
             },
             #[cfg(feature = "braille-input")]
             Msg::BrailleInput(text) => {
                 if text == self.braille_input {
                     should_render = false;
                 } else {
+                    // Typing restores the normal color before this input generates output.
+                    self.braille_input_revised = true;
                     self.braille_input = text;
                     convert_braille_input(self);
                 }
@@ -872,6 +946,7 @@ impl Component for Model {
                         </select></span>
                         <input type="text" id="braille-input" size="80" autocorrect="off"
                             autocomplete="off"
+                            class={self.braille_input_class()}
                             aria-label="Braille input"
                             aria-describedby="braille-error"
                             oninput=self.link.callback(|e: InputData| Msg::BrailleInput(e.value)) />
@@ -894,6 +969,8 @@ impl Component for Model {
                     <label id="math-input-label" for="mathml-input">{"Math Input Area"}</label>
                 </h2>
                 <textarea id="mathml-input" aria-labelledby="math-input-label" rows="5" cols="80" autocorrect="off"
+                    class={self.math_input_class()}
+                    oninput=self.link.callback(|_| Msg::MathInputEdited)
                     placeholder={INPUT_MESSAGE}>
                     {INPUT_MESSAGE.to_string() + START_FORMULA}
                 </textarea>
