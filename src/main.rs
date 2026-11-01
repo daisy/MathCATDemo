@@ -273,9 +273,12 @@ async fn convert_and_render_math(pending: PendingMath) -> String {
     }
 }
 
-/// get text for level 1 header
-fn get_header() -> String {
-    return format!("MathCAT Demo (using v{})", get_version());
+fn get_version_info() -> String {
+    format!(
+        "(using v{}; {})",
+        get_version(),
+        env!("MATHCAT_BUILD_DATE")
+    )
 }
 
 
@@ -675,7 +678,7 @@ impl Component for Model {
 
         html! {
             <div>
-                <h1>{get_header()}</h1>
+                <h1>{"MathCAT Demo "}<span id="version-info">{get_version_info()}</span></h1>
                 <h2 id="math-input-heading">
                     <label id="math-input-label" for="mathml-input">{"Math Input Area"}</label>
                 </h2>
