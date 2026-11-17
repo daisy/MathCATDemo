@@ -13,6 +13,8 @@ no_autoreload = false
 public_url = "/MathCATDemo/"
 # Build in release mode.
 release = true
+# braille-parser branch: UI + MathCAT from-braille (via Cargo.toml braille-input).
+features = ["braille-input"]
 
 [watch]
 # Paths to watch. The `build.target`'s parent folder is watched by default.

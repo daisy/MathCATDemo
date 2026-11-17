@@ -119,6 +119,7 @@ jobs:
         run: |
           set -euo pipefail
           # braille-input is off by default so the main site stays MathML-only.
+          # On braille-parser it also enables MathCAT's from-braille feature set.
           if [ "$DESTINATION" = "input" ]; then
             trunk build --public-url "$PUBLIC_URL" --features braille-input
           else

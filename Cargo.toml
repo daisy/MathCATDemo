@@ -9,7 +9,6 @@ yew = "0.18.0"
 wasm-bindgen = "0.2.78"
 wasm-bindgen-futures = "0.4.29"
 js-sys = "0.3.35"
-futures = "0.3.15"
 
 anyhow = "1"    # dependency in yew was removed 11/11/21, so it will show up one of these days and this can be deleted
 lazy_static = "1.4.0"
@@ -35,7 +34,8 @@ path = "../MathCAT/"
 [features]
 default = ["console_log"]
 wasm = []
-braille-input = []
+# Enables the braille-input UI and all MathCAT from-braille parsers (UEB, Nemeth, LaTeX, ASCIIMath).
+braille-input = ["mathcat/from-braille"]
 
 [dependencies.web-sys]
 version = "0.3.35"
