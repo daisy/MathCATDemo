@@ -44,6 +44,12 @@ h2:first-child {
 #braille-input {
   margin-left: .5em;
 }
+#braille-chord-help.sr-help {
+  // Visible enough for sighted users learning chords; still read via aria-describedby.
+  margin: 0.4ex 0 0 0;
+  font-size: 0.9em;
+  color: #444;
+}
 #braille-error-row {
   margin-top: 1ex;
 }

@@ -1,6 +1,6 @@
 
 use yew::prelude::*;
-use yew::web_sys::{Element, HtmlSelectElement};
+use yew::web_sys::{Element, HtmlInputElement, HtmlSelectElement};
 use wasm_bindgen::JsCast;
 use regex::Regex;
 #[macro_use]
@@ -39,6 +39,10 @@ enum Msg {
     BrailleInput(String),
     #[cfg(feature = "braille-input")]
     BrailleInputCode(String),
+    #[cfg(feature = "braille-input")]
+    BrailleChordKeyDown(KeyboardEvent),
+    #[cfg(feature = "braille-input")]
+    BrailleChordKeyUp(KeyboardEvent),
     NavMode(&'static str),
     NavVerbosity(&'static str),
     Language(String),
@@ -102,6 +106,15 @@ struct Model {
     math_input_revised: bool,
     #[cfg(feature = "braille-input")]
     braille_input_revised: bool,
+    /// Chord keys currently held (dot bitmask).
+    #[cfg(feature = "braille-input")]
+    braille_chord_down: u8,
+    /// Dots seen in the current chord (OR of all presses).
+    #[cfg(feature = "braille-input")]
+    braille_chord_dots: u8,
+    /// True after this chord has emitted a cell; ignore further presses until all keys up.
+    #[cfg(feature = "braille-input")]
+    braille_chord_done: bool,
     tts: String,
 
     update_speech: bool,
@@ -247,6 +260,77 @@ fn uses_computer_braille(code: &str) -> bool {
 #[cfg(feature = "braille-input")]
 fn is_braille_cell(c: char) -> bool {
     (0x2800..=0x28FF).contains(&(c as u32))
+}
+
+/// Perkins-style home-row chording: F/D/S = dots 1–3, J/K/L = 4–6, A/; = 7–8.
+/// Uses `KeyboardEvent.code` so the mapping is layout-stable on QWERTY-like keyboards.
+#[cfg(feature = "braille-input")]
+fn braille_chord_dot(code: &str) -> Option<u8> {
+    Some(match code {
+        "KeyF" => 0x01,      // dot 1
+        "KeyD" => 0x02,      // dot 2
+        "KeyS" => 0x04,      // dot 3
+        "KeyJ" => 0x08,      // dot 4
+        "KeyK" => 0x10,      // dot 5
+        "KeyL" => 0x20,      // dot 6
+        "KeyA" => 0x40,      // dot 7
+        "Semicolon" => 0x80, // dot 8
+        _ => return None,
+    })
+}
+
+#[cfg(feature = "braille-input")]
+fn utf16_offset_to_byte(s: &str, utf16: u32) -> usize {
+    let mut units = 0u32;
+    for (byte_idx, ch) in s.char_indices() {
+        if units >= utf16 {
+            return byte_idx;
+        }
+        units += ch.len_utf16() as u32;
+    }
+    s.len()
+}
+
+#[cfg(feature = "braille-input")]
+fn byte_offset_to_utf16(s: &str, byte_idx: usize) -> u32 {
+    s.get(..byte_idx.min(s.len()))
+        .map(|prefix| prefix.chars().map(|c| c.len_utf16() as u32).sum())
+        .unwrap_or(0)
+}
+
+/// Insert a braille cell at the caret in `#braille-input` and sync model state.
+#[cfg(feature = "braille-input")]
+fn insert_braille_chord_cell(model: &mut Model, dots: u8) {
+    let cell = char::from_u32(0x2800 | u32::from(dots)).unwrap_or('\u{2800}');
+    let document = yew::utils::document();
+    let input = document
+        .get_element_by_id("braille-input")
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok());
+
+    let new_value = if let Some(input) = input.as_ref() {
+        let value = input.value();
+        let start_utf16 = input.selection_start().ok().flatten().unwrap_or(0);
+        let end_utf16 = input.selection_end().ok().flatten().unwrap_or(start_utf16);
+        let start = utf16_offset_to_byte(&value, start_utf16);
+        let end = utf16_offset_to_byte(&value, end_utf16);
+        let mut new_value = String::with_capacity(value.len() + cell.len_utf8());
+        new_value.push_str(&value[..start]);
+        new_value.push(cell);
+        new_value.push_str(&value[end..]);
+        let caret_utf16 = byte_offset_to_utf16(&new_value, start + cell.len_utf8());
+        input.set_value(&new_value);
+        let _ = input.set_selection_start(Some(caret_utf16));
+        let _ = input.set_selection_end(Some(caret_utf16));
+        new_value
+    } else {
+        let mut new_value = model.braille_input.clone();
+        new_value.push(cell);
+        new_value
+    };
+
+    model.braille_input_revised = true;
+    model.braille_input = new_value;
+    convert_braille_input(model);
 }
 
 fn set_pref(key: &str, value: impl AsRef<str>) {
@@ -695,6 +779,12 @@ impl Component for Model {
             math_input_revised: false,
             #[cfg(feature = "braille-input")]
             braille_input_revised: false,
+            #[cfg(feature = "braille-input")]
+            braille_chord_down: 0,
+            #[cfg(feature = "braille-input")]
+            braille_chord_dots: 0,
+            #[cfg(feature = "braille-input")]
+            braille_chord_done: false,
             tts: "SSML".to_string(),
 
             update_speech: true,
@@ -819,6 +909,52 @@ impl Component for Model {
                 } else {
                     self.braille_input_code = code;
                     convert_braille_input(self);
+                }
+            },
+            #[cfg(feature = "braille-input")]
+            Msg::BrailleChordKeyDown(ev) => {
+                should_render = false;
+                if ev.ctrl_key() || ev.alt_key() || ev.meta_key() {
+                    return false;
+                }
+                let Some(dot) = braille_chord_dot(&ev.code()) else {
+                    return false;
+                };
+                ev.prevent_default();
+                ev.stop_propagation();
+                if ev.repeat() {
+                    return false;
+                }
+                if self.braille_chord_down == 0 {
+                    self.braille_chord_dots = 0;
+                    self.braille_chord_done = false;
+                }
+                if self.braille_chord_done {
+                    return false;
+                }
+                self.braille_chord_down |= dot;
+                self.braille_chord_dots |= dot;
+            },
+            #[cfg(feature = "braille-input")]
+            Msg::BrailleChordKeyUp(ev) => {
+                should_render = false;
+                let Some(dot) = braille_chord_dot(&ev.code()) else {
+                    return false;
+                };
+                ev.prevent_default();
+                ev.stop_propagation();
+                if self.braille_chord_down & dot == 0 {
+                    return false;
+                }
+                self.braille_chord_down &= !dot;
+                if !self.braille_chord_done {
+                    self.braille_chord_done = true;
+                    insert_braille_chord_cell(self, self.braille_chord_dots);
+                    should_render = true;
+                }
+                if self.braille_chord_down == 0 {
+                    self.braille_chord_dots = 0;
+                    self.braille_chord_done = false;
                 }
             },
             Msg::NavMode(text) => {
@@ -949,11 +1085,17 @@ impl Component for Model {
                         </select></span>
                         <input type="text" id="braille-input" size="80" autocorrect="off"
                             autocomplete="off"
+                            spellcheck="false"
                             class={self.braille_input_class()}
                             aria-label="Braille input"
-                            aria-describedby="braille-error"
+                            aria-describedby="braille-chord-help braille-error"
+                            onkeydown=self.link.callback(Msg::BrailleChordKeyDown)
+                            onkeyup=self.link.callback(Msg::BrailleChordKeyUp)
                             oninput=self.link.callback(|e: InputData| Msg::BrailleInput(e.value)) />
                     </div>
+                    <p id="braille-chord-help" class="sr-help">
+                        {"regular typing, 6/8 dot chorded input, and paste are accepted"}
+                    </p>
                     <div id="braille-error-row" aria-live="assertive">
                         <label for="braille-error">{"Braille Error: "}</label>
                         <input type="text" id="braille-error" size="80" readonly=true
