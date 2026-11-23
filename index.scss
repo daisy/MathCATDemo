@@ -21,6 +21,76 @@ h2:first-child {
   min-width: 11em;
   white-space: nowrap;
 }
+#speech-table > tr:first-child,
+#braille-table > tr:first-child,
+#braille-input-table > tr:first-child {
+  display: grid;
+  grid-template-columns: 9.2em minmax(0, 1fr);
+  align-items: baseline;
+}
+#speech-table > tr:first-child > td:first-child,
+#braille-table > tr:first-child > td:first-child,
+#braille-input-table > tr:first-child > td:first-child {
+  min-width: 0;
+}
+#speech-table > tr:nth-child(2) > td:nth-child(2),
+#speech-table > tr:nth-child(2) > td:nth-child(3),
+#speech-table > tr:nth-child(3) > td:nth-child(2),
+#speech-table > tr:nth-child(3) > td:nth-child(3),
+#speech-table > tr:nth-child(3) > td:nth-child(4) {
+  position: relative;
+  left: -1.8em;
+  white-space: nowrap;
+}
+#braille-table > tr:nth-child(2) > td:nth-child(2),
+#braille-table > tr:nth-child(2) > td:nth-child(3) {
+  position: relative;
+  left: -.5em;
+  white-space: nowrap;
+}
+#speech-table > tr:nth-child(3) > td:nth-child(5) {
+  white-space: nowrap;
+}
+#Cap {
+  position: relative;
+  left: .3em;
+}
+#braille-table > tr:nth-child(2) > td:nth-child(5) {
+  white-space: nowrap;
+}
+#speech-table > tr:nth-child(2) > td:nth-child(6),
+#speech-table > tr:nth-child(2) > td:nth-child(7),
+#speech-table > tr:nth-child(2) > td:nth-child(8),
+#braille-table > tr:nth-child(2) > td:nth-child(6),
+#braille-table > tr:nth-child(2) > td:nth-child(7),
+#braille-table > tr:nth-child(2) > td:nth-child(8),
+#braille-table > tr:nth-child(2) > td:nth-child(9) {
+  white-space: nowrap;
+}
+#speech-table > tr:nth-child(2) > td:nth-child(6),
+#speech-table > tr:nth-child(2) > td:nth-child(7),
+#speech-table > tr:nth-child(2) > td:nth-child(8) {
+  position: relative;
+  left: -1.25em;
+}
+#braille-table > tr:nth-child(2) > td:nth-child(6),
+#braille-table > tr:nth-child(2) > td:nth-child(7),
+#braille-table > tr:nth-child(2) > td:nth-child(8),
+#braille-table > tr:nth-child(2) > td:nth-child(9) {
+  position: relative;
+  left: 0.06em;
+}
+#braille-input-table {
+  width: 100%;
+  table-layout: fixed;
+}
+#braille-input-code-label,
+#language-label,
+#braille-code-label {
+  display: inline-block;
+  width: 6em;
+  box-sizing: border-box;
+}
 #mathml-input {
   font-family: monospace;
   font-size: 100%;
@@ -42,7 +112,12 @@ h2:first-child {
   margin-right: auto
 }
 #braille-input {
-  margin-left: .5em;
+  width: 100%;
+  box-sizing: border-box;
+}
+#braille-chord-controls {
+  position: relative;
+  left: 1em;
 }
 #braille-chord-help.sr-help {
   // Visible enough for sighted users learning chords; still read via aria-describedby.
@@ -67,7 +142,11 @@ h2:first-child {
     padding: .25em;
     min-height: 3em;
     width: 100%;
-    white-space: pre;
+    // Do not use white-space:pre -- it inherits into the elem-math shadow grid
+    // and breaks column alignment for mscarries / mstack.
+  }
+#math-display {
+    white-space: normal;
   }
 select {
     appearance: none;
@@ -93,8 +172,9 @@ select {
   vertical-align: baseline;
   line-height: 1.2;
 }
-#speech-table > tbody > tr:first-child > td:nth-child(2),
-#braille-table > tbody > tr:first-child > td:nth-child(2) {
+#speech-table > tr:first-child > td:nth-child(2),
+#braille-table > tr:first-child > td:nth-child(2),
+#braille-input-table > tr:first-child > td:nth-child(2) {
   white-space: nowrap;
 }
 option {

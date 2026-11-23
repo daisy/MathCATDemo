@@ -42,6 +42,8 @@ enum Msg {
     #[cfg(feature = "braille-input")]
     BrailleInputCode(String),
     #[cfg(feature = "braille-input")]
+    BrailleChorded,
+    #[cfg(feature = "braille-input")]
     BrailleChordKeyDown(KeyboardEvent),
     #[cfg(feature = "braille-input")]
     BrailleChordKeyUp(KeyboardEvent),
@@ -98,6 +100,8 @@ struct Model {
     #[cfg(feature = "braille-input")]
     braille_input_code: String,
     #[cfg(feature = "braille-input")]
+    braille_chorded: bool,
+    #[cfg(feature = "braille-input")]
     braille_error: String,
     #[cfg(feature = "braille-input")]
     braille_input_generation: u64,
@@ -138,6 +142,7 @@ impl Model {
         #[cfg(feature = "braille-input")]
         {
             cookie += &format!("braille_input_code={};", self.braille_input_code);
+            cookie += &format!("braille_chorded={};", self.braille_chorded);
         }
         cookie += &format!("tts={};", self.tts);
         set_cookie(&cookie);
@@ -212,6 +217,12 @@ impl Model {
                 .iter()
                 .position(|code| *code == self.braille_input_code),
         );
+        #[cfg(feature = "braille-input")]
+        if let Some(el) = yew::utils::document().get_element_by_id("braille-chorded") {
+            if let Ok(input) = el.dyn_into::<HtmlInputElement>() {
+                input.set_checked(self.braille_chorded);
+            }
+        }
     }
 
     fn init_state_from_cookies(&mut self) {
@@ -241,6 +252,8 @@ impl Model {
                 "braille_input_code" if BRAILLE_INPUT_CODES.contains(&value.as_str()) => {
                     model.braille_input_code = value;
                 }
+                #[cfg(feature = "braille-input")]
+                "braille_chorded" => model.braille_chorded = value == "true",
                 "tts" => model.tts = value,
                 _ => (),
             }
@@ -772,6 +785,8 @@ impl Component for Model {
             #[cfg(feature = "braille-input")]
             braille_input_code: "UEB".to_string(),
             #[cfg(feature = "braille-input")]
+            braille_chorded: false,
+            #[cfg(feature = "braille-input")]
             braille_error: String::default(),
             #[cfg(feature = "braille-input")]
             braille_input_generation: 0,
@@ -914,8 +929,18 @@ impl Component for Model {
                 }
             },
             #[cfg(feature = "braille-input")]
+            Msg::BrailleChorded => {
+                self.braille_chorded = !self.braille_chorded;
+                self.braille_chord_down = 0;
+                self.braille_chord_dots = 0;
+                self.braille_chord_done = false;
+            },
+            #[cfg(feature = "braille-input")]
             Msg::BrailleChordKeyDown(ev) => {
                 should_render = false;
+                if !self.braille_chorded {
+                    return false;
+                }
                 if ev.ctrl_key() || ev.alt_key() || ev.meta_key() {
                     return false;
                 }
@@ -940,6 +965,9 @@ impl Component for Model {
             #[cfg(feature = "braille-input")]
             Msg::BrailleChordKeyUp(ev) => {
                 should_render = false;
+                if !self.braille_chorded {
+                    return false;
+                }
                 let Some(dot) = braille_chord_dot(&ev.code()) else {
                     return false;
                 };
@@ -1079,24 +1107,37 @@ impl Component for Model {
             });
             html! {
                 <>
-                    <div id="braille-input-row">
-                        <label id="braille-input-code-label" for="braille-input-code">{"Braille Input: "}</label>
-                        <span class="select"><select name="braille_input_code" id="braille-input-code" aria-labelledby="braille-input-code-label"
-                            onchange=on_braille_input_code>
-                        { option_list(BRAILLE_INPUT_CODES.iter().copied(), &self.braille_input_code) }
-                        </select></span>
+                    <table id="braille-input-table" role="presentation">
+                        <tr>
+                            <td><h2 id="braille-input-heading"><label id="braille-input-label" for="braille-input">{"Braille Input"}</label></h2></td>
+                            <td>
+                                <label id="braille-input-code-label" for="braille-input-code">{"Braille Code: "}</label>
+                                <span class="select"><select name="braille_input_code" id="braille-input-code" aria-labelledby="braille-input-code-label"
+                                    onchange=on_braille_input_code>
+                                { option_list(BRAILLE_INPUT_CODES.iter().copied(), &self.braille_input_code) }
+                                </select></span>
+                                <span id="braille-chord-controls">
+                                    <input type="checkbox" id="braille-chorded" name="braille-chorded"
+                                        checked={self.braille_chorded}
+                                        onclick=self.link.callback(|_| Msg::BrailleChorded) />
+                                    <label for="braille-chorded">{"Use chording"}</label>
+                                </span>
+                            </td>
+                        </tr>
+                        <tr><td colspan="2">
                         <input type="text" id="braille-input" size="80" autocorrect="off"
                             autocomplete="off"
                             spellcheck="false"
                             class={self.braille_input_class()}
-                            aria-label="Braille input"
+                            aria-labelledby="braille-input-label"
                             aria-describedby="braille-chord-help braille-error"
                             onkeydown=self.link.callback(Msg::BrailleChordKeyDown)
                             onkeyup=self.link.callback(Msg::BrailleChordKeyUp)
                             oninput=self.link.callback(|e: InputData| Msg::BrailleInput(e.value)) />
-                    </div>
+                        </td></tr>
+                    </table>
                     <p id="braille-chord-help" class="sr-help">
-                        {"regular typing, 6/8 dot chorded input, and paste are accepted"}
+                        {"When Chorded is checked, 6/8 dot chords are accepted; otherwise use regular typing. Paste is always accepted."}
                     </p>
                     <div id="braille-error-row" aria-live="assertive">
                         <label for="braille-error">{"Braille Error: "}</label>
@@ -1173,8 +1214,9 @@ impl Component for Model {
                         <td>{ radio(&self.link, "Terse", "verbosity", "Terse", self.verbosity == "Terse", |_| Msg::SpeechVerbosity("Terse")) }</td>
                         <td>{ radio(&self.link, "Medium", "verbosity", "Medium", self.verbosity == "Medium", |_| Msg::SpeechVerbosity("Medium")) }</td>
                         <td>{ radio(&self.link, "Verbose", "verbosity", "Verbose", self.verbosity == "Verbose", |_| Msg::SpeechVerbosity("Verbose")) }</td>
-                        <td><label for="Cap" class="next-group">{"Say \"cap\""}</label></td>
-                        <td><input type="checkbox" id="Cap" name="say-cap"
+                        <td class="next-group">
+                            <label for="Cap">{"Say \"cap\""}</label>
+                            <input type="checkbox" id="Cap" name="say-cap"
                                 checked = {self.say_caps}
                                 onclick=self.link.callback(|_| Msg::SayCaps("ignored"))/>
                         </td>

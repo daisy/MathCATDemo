@@ -34,8 +34,10 @@ path = "../MathCAT/"
 [features]
 default = ["console_log"]
 wasm = []
-# Enables the braille-input UI and all MathCAT from-braille parsers (UEB, Nemeth, LaTeX, ASCIIMath).
+# Declared so #[cfg(feature = "braille-input")] is valid. Use [] against MathCAT without
+# from-braille (main / elementary-math-as-grid). On the braille-parser MathCAT branch, use:
 braille-input = ["mathcat/from-braille"]
+# braille-input = []
 
 [dependencies.web-sys]
 version = "0.3.35"
