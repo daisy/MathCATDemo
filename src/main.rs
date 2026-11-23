@@ -1,6 +1,8 @@
 
 use yew::prelude::*;
-use yew::web_sys::{Element, HtmlInputElement, HtmlSelectElement};
+use yew::web_sys::{Element, HtmlSelectElement};
+#[cfg(feature = "braille-input")]
+use yew::web_sys::HtmlInputElement;
 use wasm_bindgen::JsCast;
 use regex::Regex;
 #[macro_use]
