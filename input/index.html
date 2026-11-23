@@ -97,14 +97,83 @@
       return mathml;
     }
 
-    // Insert canonical MathML and run MathJax's regular typeset pipeline
+    // Elementary math (mstack/mlongdiv) is not MathML Core; the W3C polyfill
+    // draws a CSS grid and keeps the original MathML for MathCAT/a11y.
+    // https://w3c.github.io/mathml-polyfills/elem-math/
+    const ELEM_MATH_RE = /<\/?\s*(?:mstack|mlongdiv)\b/i;
+    const MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
+    let elemMathPolyfillPromise = null;
+
+    async function ensureElemMathPolyfill() {
+      if (window._MathTransforms && window._MathTransforms._plugins.has('mstack')) {
+        return window._MathTransforms;
+      }
+      if (!elemMathPolyfillPromise) {
+        elemMathPolyfillPromise = (async () => {
+          const [{ _MathTransforms }] = await Promise.all([
+            import('https://w3c.github.io/mathml-polyfills/common/math-transforms.js'),
+            import('https://w3c.github.io/mathml-polyfills/elem-math/elemMath.js'),
+          ]);
+          if (!document.getElementById('mathml-elem-math-polyfill-css')) {
+            const sheet = _MathTransforms.getCSSStyleSheet();
+            sheet.id = 'mathml-elem-math-polyfill-css';
+            document.head.appendChild(sheet);
+          }
+          window._MathTransforms = _MathTransforms;
+          return _MathTransforms;
+        })();
+      }
+      return elemMathPolyfillPromise;
+    }
+
+    // HTML innerHTML does not treat <none/> / <msline/> as empty; nested <none>
+    // breaks mscarries columns. Parse as XML like the W3C polyfill demo, and
+    // force the MathML namespace so querySelectorAll('mstack') matches after import.
+    function insertMathMLXml(container, mathml) {
+      let text = mathml.trim().replace(/^\uFEFF/, '');
+      text = text.replace(/^\s*<\?xml[\s\S]*?\?>/, '').trim();
+      const mathOpen = text.match(/<math\b[^>]*>/i)?.[0] || '';
+      if (mathOpen && !/\sxmlns\s*=/i.test(mathOpen)) {
+        text = text.replace(/<math\b/i, `<math xmlns="${MATHML_NS}"`);
+      }
+      const parsed = new DOMParser().parseFromString(text, 'application/xml');
+      if (parsed.querySelector('parsererror')) {
+        console.warn('MathML XML parse failed; falling back to innerHTML');
+        container.innerHTML = mathml;
+        return;
+      }
+      const maths = [...parsed.getElementsByTagNameNS(MATHML_NS, 'math')];
+      container.replaceChildren();
+      if (maths.length) {
+        for (const math of maths) {
+          container.appendChild(document.importNode(math, true));
+        }
+      } else {
+        console.warn('No namespaced <math> after XML parse; falling back to innerHTML');
+        container.innerHTML = mathml;
+      }
+    }
+
+    // Insert canonical MathML. Elementary math uses the W3C polyfill; everything
+    // else goes through MathJax's typeset pipeline.
     async function TypesetMathML(mathml) {
-      await MathJax.startup.promise;
       const container = document.getElementById(MATH_DISPLAY_ID);
       if (!container) {
         throw new Error('math-display container not found');
       }
+      await MathJax.startup.promise;
       MathJax.typesetClear([container]);
+
+      if (ELEM_MATH_RE.test(mathml)) {
+        const transforms = await ensureElemMathPolyfill();
+        // #mathml-output uses white-space:pre; it inherits into the shadow grid.
+        container.style.whiteSpace = 'normal';
+        insertMathMLXml(container, mathml);
+        transforms.transform(container);
+        return;
+      }
+
+      container.style.whiteSpace = '';
       container.innerHTML = mathml;
       await MathJax.typesetPromise([container]);
     }
@@ -339,13 +408,13 @@
       }
     </script>
 
-    <link rel="stylesheet" href="/MathCATDemo/input/index-f61758edc91b4d09.css" integrity="sha384-LrRQThTDesq2OdHz/ux6QnK/exteTGlOFxWguA/f8E4q6TrfIHuwIX6wMP+L3Qdp"/>  
+    <link rel="stylesheet" href="/MathCATDemo/input/index-73316ad036396ef0.css" integrity="sha384-q7p3SdQrHYG18QFnrOg0yFGE9pkfi5IwdM7kpuQQyfhgFjsii+S7c4xgGBH85Hty"/>  
     <!-- for debugging -->
     
 <script type="module">
-import init, * as bindings from '/MathCATDemo/input/math_cat_demo-eaf4187379ced3e3.js';
+import init, * as bindings from '/MathCATDemo/input/math_cat_demo-4d272fc98ff6d6f0.js';
 
-const wasm = await init({ module_or_path: '/MathCATDemo/input/math_cat_demo-23f6e73dd537feed_bg.wasm' });
+const wasm = await init({ module_or_path: '/MathCATDemo/input/math_cat_demo-a8ce39873d508086_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -354,5 +423,5 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>  
-<link rel="modulepreload" href="/MathCATDemo/input/math_cat_demo-eaf4187379ced3e3.js" crossorigin="anonymous" integrity="sha384-5B6OzPCNNm93PDmpMRIDUrWkZmh8Sj7xNSJCjaridFZk8+2VgApibFEoEGo3FYwy"><link rel="preload" href="/MathCATDemo/input/math_cat_demo-23f6e73dd537feed_bg.wasm" crossorigin="anonymous" integrity="sha384-h2drQ4OMfr3XQJUM+wFwYnx07NNBI5JhvH8Q+yvl4CPlI3hYwCGrAzRNHgYcCFmU" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/MathCATDemo/input/math_cat_demo-4d272fc98ff6d6f0.js" crossorigin="anonymous" integrity="sha384-jB1w8iyUQy3j+4SxZMVSFNAEfxuKwJ2VIktF3BAIngKC0PHUjik7czZ1dGuNtE/Z"><link rel="preload" href="/MathCATDemo/input/math_cat_demo-a8ce39873d508086_bg.wasm" crossorigin="anonymous" integrity="sha384-NpTedPw4NaTdOTchJX9YCx1twFryPRV92/2nsKW/iaTZvWO2EWfK+6fzqSpua9yu" as="fetch" type="application/wasm"></head>
 </html>
