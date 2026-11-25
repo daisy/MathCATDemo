@@ -17,7 +17,8 @@ export function pollyMarksFromJsonLines(text) {
 export function googleMarksFromTimepoints(timepoints) {
   return sortMarks(
     (timepoints || []).map((point) => ({
-      time: Math.round(Number(point.timeSeconds) * 1000),
+      // JSON may omit a zero time.
+      time: Math.round(Number(point.timeSeconds ?? 0) * 1000),
       value: point.markName,
     }))
   );

@@ -1,4 +1,5 @@
 import { wrapSpeak } from '../lib/ssml.js';
+import { billableCharacters, reserveCharacters } from '../lib/usage.js';
 import { voiceForLang } from '../lib/voices.js';
 import * as polly from './polly.js';
 import * as google from './google.js';
@@ -21,7 +22,8 @@ export function getProviderName() {
 export async function synthesizeSpeech({ text, lang }) {
   const providerName = getProviderName();
   const provider = PROVIDERS[providerName];
-  const ssml = wrapSpeak(text, lang, providerName);
   const voice = voiceForLang(providerName, lang);
-  return provider.synthesize({ ssml, voice, lang });
+  const ssml = wrapSpeak(text, voice, providerName);
+  await reserveCharacters(billableCharacters(ssml));
+  return provider.synthesize({ ssml, voice });
 }

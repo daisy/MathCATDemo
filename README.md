@@ -19,7 +19,7 @@ The browser is engine-agnostic: it POSTs `{ text, lang }` to the proxy URL. Voic
 | Provider | `TTS_PROVIDER` | Credentials (Lambda env / SAM parameters) |
 |----------|----------------|---------------------------------------------|
 | Amazon Polly (default) | `polly` | Lambda execution role (`polly:SynthesizeSpeech`) |
-| Google Cloud TTS | `google` | `GOOGLE_SERVICE_ACCOUNT_JSON` (full service-account JSON) |
+| Google Cloud TTS (WaveNet) | `google` | `GOOGLE_TTS_API_KEY` (API key restricted to Text-to-Speech) |
 | Azure Speech | `azure` | `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` |
 
 Note: MathCAT sets **TTS** to **SSML**. Plain text is shown in the speech pane but not sent for playback.
@@ -37,7 +37,7 @@ sam deploy --guided
 
 During `sam deploy --guided`, set `TtsProvider` to `polly`, `google`, or `azure`. For Google or Azure, also supply the credential parameters (or add them later in the Lambda console). Copy the **`TtsApiUrl`** output from the deploy (it ends with `/tts`).
 
-For **running on the web**, push changes under `lambda/tts/` to `main` and use the GitHub Actions workflow [`.github/workflows/deploy-tts-lambda.yml`](.github/workflows/deploy-tts-lambda.yml). Required repository secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`. Optional: `TTS_PROVIDER`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`.
+For **running on the web**, push changes under `lambda/tts/` to `main` and use the GitHub Actions workflow [`.github/workflows/deploy-tts-lambda.yml`](.github/workflows/deploy-tts-lambda.yml). Required repository secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`. Optional: `TTS_PROVIDER`, `GOOGLE_TTS_API_KEY`, `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`.
 
 CORS is preconfigured for the live demo and local dev: `https://daisy.github.io`, `http://localhost:8080`, and `http://127.0.0.1:8080` (see `AllowedOrigins` in [`lambda/tts/template.yaml`](lambda/tts/template.yaml)). Change that parameter if you host the demo elsewhere.
 
