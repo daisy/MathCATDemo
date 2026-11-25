@@ -22,10 +22,23 @@ Parameters:
   AzureSpeechRegion:
     Type: String
     Default: ''
-  GoogleServiceAccountJson:
+  GoogleTtsApiKey:
     Type: String
     Default: ''
     NoEcho: true
+  DailyCharLimit:
+    Type: Number
+    Default: 125000
+    MinValue: 0
+    Description: Most characters to synthesize per UTC day (0 turns speech off)
+
+Globals:
+  HttpApi:
+    # Slows abuse by limiting total traffic per route (not per caller).
+    # DailyCharLimit is what caps the TTS bill.
+    DefaultRouteSettings:
+      ThrottlingRateLimit: 2
+      ThrottlingBurstLimit: 10
 
 Resources:
   TtsFunction:
@@ -44,13 +57,19 @@ Resources:
           TTS_PROVIDER: !Ref TtsProvider
           AZURE_SPEECH_KEY: !Ref AzureSpeechKey
           AZURE_SPEECH_REGION: !Ref AzureSpeechRegion
-          GOOGLE_SERVICE_ACCOUNT_JSON: !Ref GoogleServiceAccountJson
+          GOOGLE_TTS_API_KEY: !Ref GoogleTtsApiKey
+          DAILY_CHAR_LIMIT: !Ref DailyCharLimit
+          USAGE_TABLE: !Ref UsageTable
       Policies:
         - Statement:
             - Effect: Allow
               Action:
                 - polly:SynthesizeSpeech
               Resource: '*'
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+              Resource: !GetAtt UsageTable.Arn
       Events:
         TtsPost:
           Type: HttpApi
@@ -62,6 +81,22 @@ Resources:
           Properties:
             Path: /tts
             Method: OPTIONS
+
+  UsageTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: day
+          AttributeType: S
+      KeySchema:
+        - AttributeName: day
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
 
 Outputs:
   TtsApiUrl:

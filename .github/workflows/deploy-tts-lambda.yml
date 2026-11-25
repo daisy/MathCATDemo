@@ -15,15 +15,15 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 'latest'
+          node-version: '24'
 
-      - uses: aws-actions/setup-sam@v2
+      - uses: aws-actions/setup-sam@v3
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -39,13 +39,19 @@ jobs:
           TTS_PROVIDER: ${{ secrets.TTS_PROVIDER }}
           AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
           AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
+          DAILY_CHAR_LIMIT: ${{ vars.DAILY_CHAR_LIMIT }}
         run: |
+          if [ "$TTS_PROVIDER" = "google" ] && [ -z "$GOOGLE_TTS_API_KEY" ]; then
+            echo "::error::TTS_PROVIDER is google but the GOOGLE_TTS_API_KEY secret is not set"
+            exit 1
+          fi
           PARAMS='AllowedOrigins="https://daisy.github.io,http://localhost:8080,http://127.0.0.1:8080"'
           PARAMS="$PARAMS TtsProvider=\"${TTS_PROVIDER:-polly}\""
           PARAMS="$PARAMS AzureSpeechKey=\"${AZURE_SPEECH_KEY:-}\""
           PARAMS="$PARAMS AzureSpeechRegion=\"${AZURE_SPEECH_REGION:-}\""
-          PARAMS="$PARAMS GoogleServiceAccountJson=\"${GOOGLE_SERVICE_ACCOUNT_JSON:-}\""
+          PARAMS="$PARAMS GoogleTtsApiKey=\"${GOOGLE_TTS_API_KEY:-}\""
+          PARAMS="$PARAMS DailyCharLimit=\"${DAILY_CHAR_LIMIT:-125000}\""
           sam build
           sam deploy --no-confirm-changeset --no-fail-on-empty-changeset \
             --stack-name mathcat-demo-tts \
