@@ -1,4 +1,8 @@
+import { HttpError } from './lib/errors.js';
 import { synthesizeSpeech } from './providers/index.js';
+
+// Limits what one request can cost. Engines also have their own limits.
+const MAX_BODY_BYTES = 20000;
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ||
   'https://daisy.github.io,http://localhost:8080,http://127.0.0.1:8080')
@@ -73,6 +77,15 @@ export const handler = async (event) => {
     return jsonResponse(405, origin, { error: 'Method not allowed' });
   }
 
+  // CORS headers only hide the response; refuse here so nothing is billed.
+  if (!origin) {
+    return jsonResponse(403, origin, { error: 'Origin not allowed' });
+  }
+
+  if (Buffer.byteLength(event.body || '', 'utf8') > MAX_BODY_BYTES) {
+    return jsonResponse(413, origin, { error: 'Request is too large' });
+  }
+
   let body;
   try {
     body = JSON.parse(event.body || '{}');
@@ -80,9 +93,12 @@ export const handler = async (event) => {
     return jsonResponse(400, origin, { error: 'Invalid JSON body' });
   }
 
-  const { text, lang } = body;
-  if (!text) {
+  const { text, lang } = body || {};
+  if (!text || typeof text !== 'string') {
     return jsonResponse(400, origin, { error: 'text is required' });
+  }
+  if (lang && typeof lang !== 'string') {
+    return jsonResponse(400, origin, { error: 'lang must be a string' });
   }
 
   try {
@@ -92,6 +108,9 @@ export const handler = async (event) => {
     });
     return jsonResponse(200, origin, result);
   } catch (err) {
+    if (err instanceof HttpError) {
+      return jsonResponse(err.statusCode, origin, { error: err.message });
+    }
     console.error('TTS synthesis failed:', err);
     return jsonResponse(502, origin, { error: 'TTS synthesis failed' });
   }

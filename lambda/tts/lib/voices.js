@@ -17,21 +17,28 @@ const VOICES = {
     'zh-tw': 'Zhiyu',
   },
   google: {
-    da: 'da-DK-Neural2-F',
-    de: 'de-DE-Neural2-F',
-    en: 'en-US-Neural2-F',
-    es: 'es-ES-Neural2-F',
-    fi: 'fi-FI-Wavenet-A',
-    fr: 'fr-FR-Neural2-C',
+    // https://docs.cloud.google.com/text-to-speech/docs/list-voices-and-types
+    da: 'da-DK-Wavenet-F',
+    de: 'de-DE-Wavenet-G',
+    el: 'el-GR-Wavenet-B',
+    en: 'en-US-Wavenet-F',
+    'en-gb': 'en-GB-Wavenet-A',
+    es: 'es-ES-Wavenet-F',
+    fi: 'fi-FI-Wavenet-B',
+    fr: 'fr-FR-Wavenet-F',
+    hu: 'hu-HU-Wavenet-B',
     id: 'id-ID-Wavenet-A',
-    is: 'is-IS-Standard-A',
-    it: 'it-IT-Neural2-A',
-    nb: 'nb-NO-Wavenet-A',
-    nl: 'nl-NL-Wavenet-A',
-    pl: 'pl-PL-Wavenet-A',
-    pt: 'pt-PT-Wavenet-A',
+    is: 'is-IS-Standard-B', // Icelandic has no WaveNet voice
+    it: 'it-IT-Wavenet-E',
+    ja: 'ja-JP-Wavenet-A',
+    nb: 'nb-NO-Wavenet-F',
+    nl: 'nl-NL-Wavenet-F',
+    pl: 'pl-PL-Wavenet-F',
+    pt: 'pt-PT-Wavenet-E',
+    ru: 'ru-RU-Wavenet-A',
     sv: 'sv-SE-Wavenet-A',
-    vi: 'vi-VN-Neural2-A',
+    vi: 'vi-VN-Wavenet-A',
+    zh: 'cmn-CN-Wavenet-A',
     'zh-cn': 'cmn-CN-Wavenet-A',
     'zh-tw': 'cmn-TW-Wavenet-A',
   },
@@ -56,8 +63,14 @@ const VOICES = {
   },
 };
 
+// Tries the exact language, then its base ("pt-br" -> "pt"), then English.
 export function voiceForLang(provider, lang) {
   const table = VOICES[provider] || VOICES.polly;
   const key = lang?.toLowerCase() || 'en';
-  return table[key] || table.en;
+  return table[key] || table[key.split('-')[0]] || table.en;
+}
+
+// "cmn-TW-Wavenet-A" -> "cmn-TW". Google and Azure voice names start with their locale.
+export function localeFromVoice(voice) {
+  return voice.split('-').slice(0, 2).join('-');
 }

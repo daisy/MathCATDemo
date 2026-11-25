@@ -4,8 +4,8 @@
   "type": "module",
   "private": true,
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.700.0",
     "@aws-sdk/client-polly": "^3.700.0",
-    "@google-cloud/text-to-speech": "^5.6.0",
     "microsoft-cognitiveservices-speech-sdk": "^1.42.0"
   }
 }

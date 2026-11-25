@@ -1,44 +1,53 @@
-import textToSpeech from '@google-cloud/text-to-speech';
+import { HttpError } from '../lib/errors.js';
+import { isTooLong, prepareGoogleSsml, restoreMarkNames } from '../lib/google-ssml.js';
 import { googleMarksFromTimepoints } from '../lib/marks.js';
-import { langToLocale } from '../lib/ssml.js';
+import { localeFromVoice } from '../lib/voices.js';
 
-let client;
+// Timepoints (needed for sync highlighting) exist only in v1beta1.
+const ENDPOINT = 'https://texttospeech.googleapis.com/v1beta1/text:synthesize';
+const TIMEOUT_MS = 15000;
 
-function getClient() {
-  if (client) {
-    return client;
+export async function synthesize({ ssml, voice }) {
+  const apiKey = process.env.GOOGLE_TTS_API_KEY;
+  if (!apiKey) {
+    throw new Error('GOOGLE_TTS_API_KEY is not configured');
   }
-  const json = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (!json) {
-    throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not configured');
-  }
-  client = new textToSpeech.TextToSpeechClient({
-    credentials: JSON.parse(json),
-  });
-  return client;
-}
 
-export async function synthesize({ ssml, voice, lang }) {
-  const tts = getClient();
-  const [response] = await tts.synthesizeSpeech({
-    input: { ssml },
-    voice: {
-      languageCode: langToLocale(lang),
-      name: voice,
+  const languageCode = localeFromVoice(voice);
+  const prepared = prepareGoogleSsml(ssml, languageCode);
+
+  const response = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
     },
-    audioConfig: {
-      audioEncoding: 'MP3',
-    },
-    enableTimePointing: ['SSML_MARK'],
+    body: JSON.stringify({
+      input: { ssml: prepared.ssml },
+      voice: { languageCode, name: voice },
+      audioConfig: { audioEncoding: 'MP3' },
+      enableTimePointing: ['SSML_MARK'],
+    }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   });
 
-  if (!response.audioContent) {
+  if (!response.ok) {
+    const details = `Google TTS error ${response.status}: ${await response.text()}`;
+    if (response.status === 400 && isTooLong(prepared.ssml)) {
+      console.warn(details);
+      throw new HttpError(413, 'Expression is too long to speak');
+    }
+    throw new Error(details);
+  }
+
+  const { audioContent, timepoints } = await response.json();
+  if (!audioContent) {
     throw new Error('Google TTS returned no audio');
   }
 
   return {
-    marks: googleMarksFromTimepoints(response.timepoints),
-    audioBase64: Buffer.from(response.audioContent).toString('base64'),
+    marks: googleMarksFromTimepoints(restoreMarkNames(timepoints, prepared.names)),
+    audioBase64: audioContent,
     mimeType: 'audio/mpeg',
   };
 }
